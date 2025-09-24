@@ -17,9 +17,16 @@ export const postJob = async (req, res) => {
       description,
       location,
       salary_range,
-      employment_type, // e.g., Full-time, Part-time, Internship
-      skills,          // array of strings
-      experience_level // e.g., Fresher, Mid, Senior
+      employment_type,
+      skills_required,
+      experience_required,
+      company_name,
+      work_mode,
+      responsibilities,
+      qualifications,
+      application_deadline,
+      contact_email,
+      job_status
     } = req.body;
 
     // Employer/Recruiter ID from JWT middleware (recommended)
@@ -36,13 +43,19 @@ export const postJob = async (req, res) => {
       job_id,
       employer_id,
       job_title,
+      company_name: company_name || null,
       description,
       location,
-      salary_range: salary_range || null,
       employment_type,
-      skills: skills || [],
-      experience_level: experience_level || null,
-      status: "Open", // default status
+      work_mode: work_mode || null,
+      salary_range: salary_range || null,
+      experience_required: experience_required || null,
+      skills_required: skills_required || [],
+      responsibilities: responsibilities || [],
+      qualifications: qualifications || [],
+      application_deadline: application_deadline || null,
+      contact_email: contact_email || null,
+      status: (job_status || "Open").charAt(0).toUpperCase() + (job_status || "Open").slice(1).toLowerCase(), // normalize status
       created_at: timestamp,
       updated_at: timestamp
     };
@@ -59,9 +72,11 @@ export const postJob = async (req, res) => {
       job_id,
       job: newJob
     });
+
   } catch (err) {
     console.error("Job Post Error:", err);
     return res.status(500).json({ error: "Failed to post job" });
   }
 };
+
    
