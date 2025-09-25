@@ -70,10 +70,10 @@ export const loginAdmin = async (req, res) => {
     const result = await ddbDocClient.send(
       new ScanCommand({
         TableName: ADMIN_TABLE,
-        FilterExpression: "email = :email AND role = :role",
+        FilterExpression: "email = :email",
         ExpressionAttributeValues: {
           ":email": email,
-          ":role": "Admin",
+          // ":role": "Admin",
         },
       })
     );
@@ -105,9 +105,9 @@ export const loginAdmin = async (req, res) => {
 };
 
 // ✅ Update Admin Profile
-export const updateAdminProfile = async (req, res) => {
+export const updateProfile = async (req, res) => {
   try {
-    const email = req.params.email; // use email from path
+    const email = req.params.email;
     const updateData = req.body;
 
     if (!updateData || Object.keys(updateData).length === 0) {
@@ -124,16 +124,19 @@ export const updateAdminProfile = async (req, res) => {
       exprAttrValues[`:${key}`] = updateData[key];
     });
 
-    exprAttrNames["#updated_at"] = "updated_at";
-    exprAttrValues[":updated_at"] = new Date().toISOString();
-    updateExpr.push("#updated_at = :updated_at");
+    // Only add updated_at if it’s not already in the body
+    if (!updateData.hasOwnProperty("updated_at")) {
+      exprAttrNames["#updated_at"] = "updated_at";
+      exprAttrValues[":updated_at"] = new Date().toISOString();
+      updateExpr.push("#updated_at = :updated_at");
+    }
 
     const updateExp = `SET ${updateExpr.join(", ")}`;
 
     const result = await ddbDocClient.send(
       new UpdateCommand({
-        TableName: ADMIN_TABLE,
-        Key: { email }, // Must match table PK
+        TableName: process.env.USERS_TABLE,
+        Key: { email },
         UpdateExpression: updateExp,
         ExpressionAttributeNames: exprAttrNames,
         ExpressionAttributeValues: exprAttrValues,
@@ -142,11 +145,11 @@ export const updateAdminProfile = async (req, res) => {
     );
 
     return res.json({
-      message: "Admin profile updated successfully",
+      message: "Profile updated successfully",
       profile: result.Attributes,
     });
   } catch (err) {
-    console.error("Admin Profile Update Error:", err);
-    return res.status(500).json({ error: "Admin profile update failed" });
+    console.error("Profile Update Error:", err);
+    return res.status(500).json({ error: "Profile update failed" });
   }
 };

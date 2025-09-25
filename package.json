@@ -1,7 +1,7 @@
 {
   "name": "student-service",
   "version": "1.0.0",
-  "type": "module", 
+  "type": "module",
   "description": "",
   "main": "server.js",
   "scripts": {
@@ -19,6 +19,7 @@
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "serverless-http": "^4.0.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

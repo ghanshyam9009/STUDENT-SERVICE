@@ -98,48 +98,52 @@ export const loginStudent = async (req, res) => {
 
 // ✅ Update Profile (protected route)import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 export const updateProfile = async (req, res) => {
-    try {
-      const email = req.params.email; // now use email from path
-      const updateData = req.body;
-  
-      if (!updateData || Object.keys(updateData).length === 0) {
-        return res.status(400).json({ error: "No data provided to update" });
-      }
-  
-      const updateExpr = [];
-      const exprAttrNames = {};
-      const exprAttrValues = {};
-  
-      Object.keys(updateData).forEach((key) => {
-        updateExpr.push(`#${key} = :${key}`);
-        exprAttrNames[`#${key}`] = key;
-        exprAttrValues[`:${key}`] = updateData[key];
-      });
-  
+  try {
+    const email = req.params.email;
+    const updateData = req.body;
+
+    if (!updateData || Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: "No data provided to update" });
+    }
+
+    const updateExpr = [];
+    const exprAttrNames = {};
+    const exprAttrValues = {};
+
+    Object.keys(updateData).forEach((key) => {
+      updateExpr.push(`#${key} = :${key}`);
+      exprAttrNames[`#${key}`] = key;
+      exprAttrValues[`:${key}`] = updateData[key];
+    });
+
+    // Only add updated_at if it’s not already in the body
+    if (!updateData.hasOwnProperty("updated_at")) {
       exprAttrNames["#updated_at"] = "updated_at";
       exprAttrValues[":updated_at"] = new Date().toISOString();
       updateExpr.push("#updated_at = :updated_at");
-  
-      const updateExp = `SET ${updateExpr.join(", ")}`;
-  
-      const result = await ddbDocClient.send(
-        new UpdateCommand({
-          TableName: process.env.USERS_TABLE,
-          Key: { email }, // ✅ must match table PK
-          UpdateExpression: updateExp,
-          ExpressionAttributeNames: exprAttrNames,
-          ExpressionAttributeValues: exprAttrValues,
-          ReturnValues: "ALL_NEW",
-        })
-      );
-  
-      return res.json({
-        message: "Profile updated successfully",
-        profile: result.Attributes,
-      });
-    } catch (err) {
-      console.error("Profile Update Error:", err);
-      return res.status(500).json({ error: "Profile update failed" });
     }
-  };
+
+    const updateExp = `SET ${updateExpr.join(", ")}`;
+
+    const result = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: process.env.USERS_TABLE,
+        Key: { email },
+        UpdateExpression: updateExp,
+        ExpressionAttributeNames: exprAttrNames,
+        ExpressionAttributeValues: exprAttrValues,
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.json({
+      message: "Profile updated successfully",
+      profile: result.Attributes,
+    });
+  } catch (err) {
+    console.error("Profile Update Error:", err);
+    return res.status(500).json({ error: "Profile update failed" });
+  }
+};
+
   

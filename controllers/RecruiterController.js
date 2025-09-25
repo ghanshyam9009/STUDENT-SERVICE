@@ -143,9 +143,9 @@ export const loginEmployer = async (req, res) => {
 // -----------------------------------------
 // ✅ Update Employer Profile
 // -----------------------------------------
-export const updateEmployerProfile = async (req, res) => {
+export const updateProfile = async (req, res) => {
   try {
-    const { employer_id } = req.params; // path param
+    const email = req.params.email;
     const updateData = req.body;
 
     if (!updateData || Object.keys(updateData).length === 0) {
@@ -157,37 +157,37 @@ export const updateEmployerProfile = async (req, res) => {
     const exprAttrValues = {};
 
     Object.keys(updateData).forEach((key) => {
-      // Don't allow direct password update here for security
-      if (key !== "password" && key !== "employer_id") {
-        updateExpr.push(`#${key} = :${key}`);
-        exprAttrNames[`#${key}`] = key;
-        exprAttrValues[`:${key}`] = updateData[key];
-      }
+      updateExpr.push(`#${key} = :${key}`);
+      exprAttrNames[`#${key}`] = key;
+      exprAttrValues[`:${key}`] = updateData[key];
     });
 
-    exprAttrNames["#updated_at"] = "updated_at";
-    exprAttrValues[":updated_at"] = new Date().toISOString();
-    updateExpr.push("#updated_at = :updated_at");
+    // Only add updated_at if it’s not already in the body
+    if (!updateData.hasOwnProperty("updated_at")) {
+      exprAttrNames["#updated_at"] = "updated_at";
+      exprAttrValues[":updated_at"] = new Date().toISOString();
+      updateExpr.push("#updated_at = :updated_at");
+    }
 
     const updateExp = `SET ${updateExpr.join(", ")}`;
 
     const result = await ddbDocClient.send(
       new UpdateCommand({
-        TableName: EMPLOYER_TABLE,
-        Key: { employer_id },
+        TableName: process.env.USERS_TABLE,
+        Key: { email },
         UpdateExpression: updateExp,
         ExpressionAttributeNames: exprAttrNames,
         ExpressionAttributeValues: exprAttrValues,
-        ReturnValues: "ALL_NEW"
+        ReturnValues: "ALL_NEW",
       })
     );
 
     return res.json({
-      message: "Employer profile updated successfully",
-      profile: result.Attributes
+      message: "Profile updated successfully",
+      profile: result.Attributes,
     });
   } catch (err) {
-    console.error("Employer Profile Update Error:", err);
-    return res.status(500).json({ error: "Employer profile update failed" });
+    console.error("Profile Update Error:", err);
+    return res.status(500).json({ error: "Profile update failed" });
   }
 };
