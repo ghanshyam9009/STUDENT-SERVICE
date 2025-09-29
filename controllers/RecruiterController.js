@@ -143,7 +143,7 @@ export const loginEmployer = async (req, res) => {
 // -----------------------------------------
 // ✅ Update Employer Profile
 // -----------------------------------------
-export const updateProfile = async (req, res) => {
+export const updateEmployerProfile = async (req, res) => {
   try {
     const email = req.params.email;
     const updateData = req.body;

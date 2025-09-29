@@ -105,7 +105,7 @@ export const loginAdmin = async (req, res) => {
 };
 
 // ✅ Update Admin Profile
-export const updateProfile = async (req, res) => {
+export const updateAdminProfile = async (req, res) => {
   try {
     const email = req.params.email;
     const updateData = req.body;
