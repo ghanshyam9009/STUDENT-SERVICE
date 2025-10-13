@@ -6,7 +6,8 @@ import RecruiterRoutes from "./routes/RecruiterRoutes.js";
 import jobRoutes from "./routes/jobRoutes.js";
 import applicationRoutes from "./routes/applicationRoutes.js";
 import passwordRoutes from "./routes/passwordRoutes.js";
-
+import paymentroutes from "./routes/paymentroutes.js"
+import premiumroutes from "./routes/premiumRoutes.js"
 
 dotenv.config();
 
@@ -19,6 +20,8 @@ app.use("/api/Recruiter", RecruiterRoutes);
 app.use("/api/job", jobRoutes);
 app.use("/api/application", applicationRoutes);
 app.use("/api/password", passwordRoutes);
+app.use("/api",paymentroutes);
+app.use("/api/premium", premiumroutes);
 
 
 const PORT = process.env.PORT || 5000;

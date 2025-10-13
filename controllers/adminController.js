@@ -11,7 +11,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const ADMIN_TABLE = process.env.ADMIN_TABLE; // or process.env.ADMINS_TABLE if using a separate table
-
+const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
+const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE; // DynamoDB table name
 // ✅ Register Admin
 export const registerAdmin = async (req, res) => {
   try {
@@ -153,3 +154,127 @@ export const updateAdminProfile = async (req, res) => {
     return res.status(500).json({ error: "Profile update failed" });
   }
 };
+
+
+
+// Update subscription prices for plans
+export const updatePremiumPrices = async (req, res) => {
+  try {
+    const { gold, platinum, silver } = req.body;
+
+    // Basic validation - all three prices should be present and numbers
+    if (
+      gold === undefined ||
+      platinum === undefined ||
+      silver === undefined ||
+      isNaN(gold) ||
+      isNaN(platinum) ||
+      isNaN(silver)
+    ) {
+      return res.status(400).json({
+        error: "gold, platinum, and silver prices are required and must be numbers",
+      });
+    }
+
+    // We can store these prices as one item with a fixed id (e.g. subscription_id = 'default')
+    const subscriptionItem = {
+      subscription_id: "default", // static ID for single subscription record
+      gold: Number(gold),
+      platinum: Number(platinum),
+      silver: Number(silver),
+      updated_at: new Date().toISOString(),
+    };
+
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: SUBSCRIPTION_TABLE,
+        Item: subscriptionItem,
+      })
+    );
+
+    return res.status(200).json({
+      message: "Subscription prices updated successfully",
+      subscription: subscriptionItem,
+    });
+  } catch (error) {
+    console.error("Error updating subscription prices:", error);
+    return res.status(500).json({ error: "Failed to update subscription prices" });
+  }
+};
+
+
+
+export const approveRecruiter = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Recruiter email is required" });
+    }
+
+    // First, find recruiter by email
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: EMPLOYER_TABLE,
+        FilterExpression: "email = :email",
+        ExpressionAttributeValues: {
+          ":email": email
+        }
+      })
+    );
+
+    if (!result.Items || result.Items.length === 0) {
+      return res.status(404).json({ error: "Recruiter not found" });
+    }
+
+    const recruiter = result.Items[0];
+
+    // Update hasadminapproved to true
+    const updateResult = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: EMPLOYER_TABLE,
+        Key: {
+          employer_id: recruiter.employer_id
+        },
+        UpdateExpression: "SET hasadminapproved = :approved",
+        ExpressionAttributeValues: {
+          ":approved": true
+        },
+        ReturnValues: "ALL_NEW"
+      })
+    );
+
+    return res.status(200).json({
+      message: "Recruiter approved successfully",
+      recruiter: updateResult.Attributes
+    });
+  } catch (error) {
+    console.error("Error approving recruiter:", error);
+    return res.status(500).json({ error: "Failed to approve recruiter" });
+  }
+};
+
+
+
+
+export const getAllRecruiters = async (req, res) => {
+  try {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: EMPLOYER_TABLE
+      })
+    );
+
+    const recruiters = result.Items || [];
+
+    return res.status(200).json({
+      count: recruiters.length,
+      recruiters
+    });
+  } catch (error) {
+    console.error("Error fetching recruiters:", error);
+    return res.status(500).json({ error: "Failed to fetch recruiters" });
+  }
+};
+
+

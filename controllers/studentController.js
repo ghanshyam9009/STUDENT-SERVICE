@@ -13,7 +13,7 @@ export const upload = multer({ storage });
 dotenv.config();
 
 const USERS_TABLE = process.env.USERS_TABLE;
-
+const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
 
 
 
@@ -108,55 +108,6 @@ export const loginStudent = async (req, res) => {
     }
   };
 
-// ✅ Update Profile (protected route)import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
-// export const updateProfile = async (req, res) => {
-//   try {
-//     const email = req.params.email;
-//     const updateData = req.body;
-
-//     if (!updateData || Object.keys(updateData).length === 0) {
-//       return res.status(400).json({ error: "No data provided to update" });
-//     }
-
-//     const updateExpr = [];
-//     const exprAttrNames = {};
-//     const exprAttrValues = {};
-
-//     Object.keys(updateData).forEach((key) => {
-//       updateExpr.push(`#${key} = :${key}`);
-//       exprAttrNames[`#${key}`] = key;
-//       exprAttrValues[`:${key}`] = updateData[key];
-//     });
-
-//     // Only add updated_at if it’s not already in the body
-//     if (!updateData.hasOwnProperty("updated_at")) {
-//       exprAttrNames["#updated_at"] = "updated_at";
-//       exprAttrValues[":updated_at"] = new Date().toISOString();
-//       updateExpr.push("#updated_at = :updated_at");
-//     }
-
-//     const updateExp = `SET ${updateExpr.join(", ")}`;
-
-//     const result = await ddbDocClient.send(
-//       new UpdateCommand({
-//         TableName: process.env.USERS_TABLE,
-//         Key: { email },
-//         UpdateExpression: updateExp,
-//         ExpressionAttributeNames: exprAttrNames,
-//         ExpressionAttributeValues: exprAttrValues,
-//         ReturnValues: "ALL_NEW",
-//       })
-//     );
-
-//     return res.json({
-//       message: "Profile updated successfully",
-//       profile: result.Attributes,
-//     });
-//   } catch (err) {
-//     console.error("Profile Update Error:", err);
-//     return res.status(500).json({ error: "Profile update failed" });
-//   }
-// };
 
 
 export const updateProfile = async (req, res) => {
@@ -223,5 +174,69 @@ export const updateProfile = async (req, res) => {
   } catch (err) {
     console.error("Profile Update Error:", err);
     return res.status(500).json({ error: "Profile update failed" });
+  }
+};
+
+
+
+
+export const markStudentPremium = async (req, res) => {
+  try {
+    const { student_email, is_premium, plan } = req.body;
+
+    if (!student_email || typeof is_premium !== "boolean" || !plan) {
+      return res
+        .status(400)
+        .json({ error: "student_email, is_premium (boolean), and plan are required" });
+    }
+
+    const updateCommand = new UpdateCommand({
+      TableName: USERS_TABLE,
+      Key: { student_email },
+      UpdateExpression: "SET premium_user = :isPremium, plan = :plan",
+      ExpressionAttributeValues: {
+        ":isPremium": is_premium,
+        ":plan": plan,
+      },
+      ReturnValues: "ALL_NEW",
+    });
+
+    const result = await ddbDocClient.send(updateCommand);
+
+    return res.status(200).json({
+      message: `Student ${is_premium ? "marked" : "unmarked"} as premium successfully.`,
+      student: result.Attributes,
+    });
+  } catch (error) {
+    console.error("Error updating student premium_user:", error);
+    return res.status(500).json({ error: "Failed to update premium status for student" });
+  }
+};
+
+
+
+
+export const getPremiumPrices = async (req, res) => {
+  try {
+    // Fetch subscription prices for static subscription_id = 'default'
+    const result = await ddbDocClient.send(
+      new GetCommand({
+        TableName: SUBSCRIPTION_TABLE,
+        Key: {
+          subscription_id: "default",
+        },
+      })
+    );
+
+    if (!result.Item) {
+      return res.status(404).json({ error: "Subscription prices not found" });
+    }
+
+    return res.status(200).json({
+      subscription: result.Item,
+    });
+  } catch (error) {
+    console.error("Error fetching subscription prices:", error);
+    return res.status(500).json({ error: "Failed to fetch subscription prices" });
   }
 };

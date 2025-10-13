@@ -1,4 +1,5 @@
-// import { PutCommand } from "@aws-sdk/lib-dynamodb";
+
+
 import ddbDocClient from "../config/db.js";
 import dotenv from "dotenv";
 import { v4 as uuidv4 } from "uuid";
@@ -7,13 +8,52 @@ import {
   ScanCommand,
   UpdateCommand
 } from "@aws-sdk/lib-dynamodb";
+import { sendEmail } from "../utils/mailer.js";  // ✅ import mailer
+
 dotenv.config();
 
 const JOB_TABLE = process.env.JOB_TABLE;
 const GOV_JOB_TABLE = process.env.GOV_JOB_TABLE;
-const TASK_TABLE = process.env.TASK_TABLE; // replace with your Task table name
+const TASK_TABLE = process.env.TASK_TABLE;
+const USERS_TABLE = process.env.USERS_TABLE; // ✅ students table
+
 // -----------------------------------------
-// ✅ Post a Job
+// ✅ Helper: Send job notification to all students
+// -----------------------------------------
+const notifyAllStudents = async (subject, message, htmlContent) => {
+  try {
+    const studentsData = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: USERS_TABLE,
+        ProjectionExpression: "email", // fetch only emails
+      })
+    );
+
+    const students = studentsData.Items || [];
+    if (students.length === 0) {
+      console.log("No students found to send emails.");
+      return;
+    }
+
+    // Send emails in parallel (in batches for performance)
+    const emailPromises = students.map((student) =>
+      sendEmail({
+        to: student.email,
+        subject,
+        text: message,
+        html: htmlContent,
+      })
+    );
+
+    await Promise.allSettled(emailPromises);
+    console.log(`✅ Job notification emails sent to ${students.length} students`);
+  } catch (err) {
+    console.error("Error sending job notifications:", err);
+  }
+};
+
+// -----------------------------------------
+// ✅ Post a Normal Job
 // -----------------------------------------
 export const postJob = async (req, res) => {
   try {
@@ -34,7 +74,6 @@ export const postJob = async (req, res) => {
       job_status
     } = req.body;
 
-    // ✅ Employer/Recruiter ID from JWT middleware or request body
     const employer_id = req.user?.employer_id || req.body.employer_id;
 
     if (!employer_id || !job_title || !description || !location || !employment_type) {
@@ -44,7 +83,6 @@ export const postJob = async (req, res) => {
     const job_id = uuidv4();
     const timestamp = new Date().toISOString();
 
-    // ✅ Job Entry
     const newJob = {
       job_id,
       employer_id,
@@ -66,17 +104,12 @@ export const postJob = async (req, res) => {
         (job_status || "Open").slice(1).toLowerCase(),
       created_at: timestamp,
       updated_at: timestamp,
-
-      // ✅ New Fields
       edit: null,
-      // closed: null,
       status_verified: "notverified",
       edit_verified: null,
-      // close_verified: null,
       to_show_user: false
     };
 
-    // ✅ Task Entry for TaskDB
     const task_id = uuidv4();
     const newTask = {
       task_id,
@@ -88,7 +121,6 @@ export const postJob = async (req, res) => {
       updated_at: timestamp
     };
 
-    // ✅ Save both Job & Task
     await Promise.all([
       ddbDocClient.send(
         new PutCommand({
@@ -104,6 +136,21 @@ export const postJob = async (req, res) => {
       )
     ]);
 
+    // ✅ Send email notification to all students
+    const subject = `📢 New Job Posted: ${job_title}`;
+    const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "a company"} at ${location}.`;
+    const htmlMsg = `
+      <h2>New Job Alert 🚀</h2>
+      <p><b>Job Title:</b> ${job_title}</p>
+      <p><b>Company:</b> ${company_name || "Not specified"}</p>
+      <p><b>Location:</b> ${location}</p>
+      <p><b>Employment Type:</b> ${employment_type}</p>
+      <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
+      <p>Log in now to apply!</p>
+    `;
+
+    notifyAllStudents(subject, textMsg, htmlMsg);
+
     return res.status(201).json({
       message: "Job posted successfully",
       job_id,
@@ -117,9 +164,9 @@ export const postJob = async (req, res) => {
   }
 };
 
-
-   
-
+// -----------------------------------------
+// ✅ Post a Government Job
+// -----------------------------------------
 export const postGovernmentJob = async (req, res) => {
   try {
     const {
@@ -130,7 +177,7 @@ export const postGovernmentJob = async (req, res) => {
       employment_type,
       skills_required,
       experience_required,
-      department_name, // e.g., UPSC, SSC, Railways
+      department_name,
       work_mode,
       responsibilities,
       qualifications,
@@ -139,10 +186,8 @@ export const postGovernmentJob = async (req, res) => {
       job_status
     } = req.body;
 
-    // ✅ Admin ID from JWT (recommended)
     const admin_id = req.user?.admin_id || req.body.admin_id;
 
-    // ✅ Required fields check
     if (!admin_id || !job_title || !description || !location || !employment_type || !department_name) {
       return res.status(400).json({ error: "Required fields missing (admin_id, job_title, etc.)" });
     }
@@ -152,7 +197,7 @@ export const postGovernmentJob = async (req, res) => {
 
     const newGovJob = {
       job_id,
-      admin_id, // ✅ store the admin who posted this job
+      admin_id,
       job_title,
       department_name,
       description,
@@ -169,7 +214,7 @@ export const postGovernmentJob = async (req, res) => {
       status: (job_status || "Open").charAt(0).toUpperCase() + (job_status || "Open").slice(1).toLowerCase(),
       created_at: timestamp,
       updated_at: timestamp,
-      posted_by: "admin" // marker for clarity
+      posted_by: "admin"
     };
 
     await ddbDocClient.send(
@@ -178,6 +223,21 @@ export const postGovernmentJob = async (req, res) => {
         Item: newGovJob
       })
     );
+
+    // ✅ Send email notification to all students
+    const subject = `🏛️ New Government Job Posted: ${job_title}`;
+    const textMsg = `A new government job in ${department_name} titled "${job_title}" is now open at ${location}.`;
+    const htmlMsg = `
+      <h2>New Government Job Alert 🏛️</h2>
+      <p><b>Job Title:</b> ${job_title}</p>
+      <p><b>Department:</b> ${department_name}</p>
+      <p><b>Location:</b> ${location}</p>
+      <p><b>Employment Type:</b> ${employment_type}</p>
+      <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
+      <p>Visit the portal to check details and apply.</p>
+    `;
+
+    notifyAllStudents(subject, textMsg, htmlMsg);
 
     return res.status(201).json({
       message: "Government job posted successfully",
@@ -190,6 +250,9 @@ export const postGovernmentJob = async (req, res) => {
     return res.status(500).json({ error: "Failed to post government job" });
   }
 };
+
+
+
 
 export const updateGovernmentJob = async (req, res) => {
   try {
@@ -246,7 +309,6 @@ export const updateGovernmentJob = async (req, res) => {
     return res.status(500).json({ error: "Failed to update government job" });
   }
 };
-
 
 
 export const updateJob = async (req, res) => {
@@ -340,5 +402,49 @@ export const updateJob = async (req, res) => {
   } catch (err) {
     console.error("Job Update Error:", err);
     return res.status(500).json({ error: "Failed to update job" });
+  }
+};
+
+
+
+
+
+export const markJobPremium = async (req, res) => {
+  try {
+    const { job_id, is_premium, category } = req.body;
+
+    if (!job_id || typeof is_premium !== "boolean" || !category) {
+      return res.status(400).json({ error: "job_id, is_premium (boolean), and category are required" });
+    }
+
+    let tableName;
+
+    if (category === "job") {
+      tableName = JOB_TABLE;
+    } else if (category === "government") {
+      tableName = GOV_JOB_TABLE;
+    } else {
+      return res.status(400).json({ error: "Invalid category. Must be 'job' or 'government'." });
+    }
+
+    const updateCommand = new UpdateCommand({
+      TableName: tableName,
+      Key: { job_id },
+      UpdateExpression: "SET premium_job = :isPremium",
+      ExpressionAttributeValues: {
+        ":isPremium": is_premium,
+      },
+      ReturnValues: "ALL_NEW",
+    });
+
+    const result = await ddbDocClient.send(updateCommand);
+
+    return res.status(200).json({
+      message: `Job in category '${category}' ${is_premium ? "marked" : "unmarked"} as premium successfully.`,
+      job: result.Attributes,
+    });
+  } catch (error) {
+    console.error("Error updating premium_job:", error);
+    return res.status(500).json({ error: "Failed to update premium status for job" });
   }
 };
