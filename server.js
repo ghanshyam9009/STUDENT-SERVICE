@@ -1,6 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
-import cors from "cors"; // <-- Import CORS
+import cors from "cors";
 
 import studentRoutes from "./routes/studentRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
@@ -15,7 +15,13 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors()); // <-- Enable CORS for all origins
+// ✅ Enable CORS for all origins and methods
+app.use(cors({
+  origin: '*', // <-- Allow all origins
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // <-- Allow common HTTP methods
+  allowedHeaders: ['Content-Type', 'Authorization'], // <-- Allow headers commonly used in APIs
+}));
+
 app.use(express.json());
 
 app.use("/api/students", studentRoutes);
