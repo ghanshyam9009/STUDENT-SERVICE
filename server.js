@@ -17,7 +17,7 @@ const app = express();
 
 // ✅ Enable CORS for all origins and methods
 app.use(cors({
-  origin: ['http://localhost:5173'], // <-- Allow all origins
+  origin: '*', // <-- Allow all origins
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // <-- Allow common HTTP methods
   allowedHeaders: ['Content-Type', 'Authorization'], // <-- Allow headers commonly used in APIs
 }));
