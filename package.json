@@ -17,6 +17,7 @@
     "@aws-sdk/lib-dynamodb": "^3.902.0",
     "aws-sdk": "^2.1692.0",
     "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
