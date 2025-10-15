@@ -10,6 +10,13 @@ import {
 
 const router = express.Router();
 
+
+
+const app = express();
+
+app.use(express.json()); 
+app.use(express.urlencoded({ extended: true }));
+
 router.post("/register", registerAdmin);
 router.post("/login", loginAdmin);
 router.put("/update/:email", updateAdminProfile);

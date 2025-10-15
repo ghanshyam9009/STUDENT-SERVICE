@@ -35,3 +35,54 @@ app.use("/api/premium", premiumroutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`All services running on port ${PORT}`));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// server {
+//     listen 80;
+//     listen [::]:80;
+
+//     # For IP-based access, no domain is required
+//     server_name _;
+
+//     # optional: allow bigger requests if needed
+//     client_max_body_size 50M;
+
+//     location / {
+//         proxy_pass http://127.0.0.1:4000;   # Node.js app on local port
+//         proxy_http_version 1.1;
+//         proxy_set_header Upgrade $http_upgrade;
+
+//         # handle websocket connections properly
+//         proxy_set_header Connection "upgrade";
+
+//         proxy_set_header Host $host;
+//         proxy_set_header X-Real-IP $remote_addr;
+//         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+//         proxy_set_header X-Forwarded-Proto $scheme;
+//         proxy_cache_bypass $http_upgrade;
+//     }
+
+//     # optional health check
+//     # optional health check
+//     location = /health {
+//         return 200 'OK';
+//         add_header Content-Type text/plain;
+//     }
+// }
+
+
+
+// http://18.141.113.253

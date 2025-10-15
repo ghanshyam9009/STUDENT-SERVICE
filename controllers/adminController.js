@@ -10,6 +10,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+import express from "express";
+
+const app = express();
+
+app.use(express.json()); 
+
 const ADMIN_TABLE = process.env.ADMIN_TABLE; // or process.env.ADMINS_TABLE if using a separate table
 const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
 const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE; // DynamoDB table name
@@ -206,13 +212,13 @@ export const updatePremiumPrices = async (req, res) => {
 
 export const approveRecruiter = async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = req.body?.email;
 
     if (!email) {
-      return res.status(400).json({ error: "Recruiter email is required" });
+      return res.status(400).json({ error: "Recruiter email is required in request body." });
     }
 
-    // First, find recruiter by email
+    // 🔍 Find recruiter by email
     const result = await ddbDocClient.send(
       new ScanCommand({
         TableName: EMPLOYER_TABLE,
@@ -229,12 +235,12 @@ export const approveRecruiter = async (req, res) => {
 
     const recruiter = result.Items[0];
 
-    // Update hasadminapproved to true
+    // ✅ Update using correct key (email is the partition key)
     const updateResult = await ddbDocClient.send(
       new UpdateCommand({
         TableName: EMPLOYER_TABLE,
         Key: {
-          employer_id: recruiter.employer_id
+          email: recruiter.email // ✅ Must match the table's key schema
         },
         UpdateExpression: "SET hasadminapproved = :approved",
         ExpressionAttributeValues: {
@@ -248,11 +254,13 @@ export const approveRecruiter = async (req, res) => {
       message: "Recruiter approved successfully",
       recruiter: updateResult.Attributes
     });
+
   } catch (error) {
     console.error("Error approving recruiter:", error);
     return res.status(500).json({ error: "Failed to approve recruiter" });
   }
 };
+
 
 
 
