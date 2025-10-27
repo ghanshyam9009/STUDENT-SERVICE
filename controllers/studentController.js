@@ -177,14 +177,11 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-
-
-
 export const markStudentPremium = async (req, res) => {
   try {
-    const { student_email, is_premium, plan } = req.body;
+    const { email, is_premium, plan } = req.body;
 
-    if (!student_email || typeof is_premium !== "boolean" || !plan) {
+    if (!email || typeof is_premium !== "boolean" || !plan) {
       return res
         .status(400)
         .json({ error: "student_email, is_premium (boolean), and plan are required" });
@@ -192,14 +189,18 @@ export const markStudentPremium = async (req, res) => {
 
     const updateCommand = new UpdateCommand({
       TableName: USERS_TABLE,
-      Key: { student_email },
-      UpdateExpression: "SET premium_user = :isPremium, plan = :plan",
+      Key: { email },
+      UpdateExpression: "SET premium_user = :isPremium, #p = :plan",
+      ExpressionAttributeNames: {
+        "#p": "plan",  // alias for reserved keyword
+      },
       ExpressionAttributeValues: {
         ":isPremium": is_premium,
         ":plan": plan,
       },
       ReturnValues: "ALL_NEW",
     });
+    
 
     const result = await ddbDocClient.send(updateCommand);
 
@@ -223,7 +224,7 @@ export const getPremiumPrices = async (req, res) => {
       new GetCommand({
         TableName: SUBSCRIPTION_TABLE,
         Key: {
-          subscription_id: "default",
+          email: "john900009@example.com",
         },
       })
     );

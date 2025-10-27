@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 router.post("/register", registerAdmin);
 router.post("/login", loginAdmin);
 router.put("/update/:email", updateAdminProfile);
-router.put("/update/premium-price",updatePremiumPrices );
+router.put("/updates/premium-pricess",updatePremiumPrices );
 router.put("/approved-recruiter", approveRecruiter);
 router.get("/get-all-recruiter",getAllRecruiters)
 

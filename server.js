@@ -15,6 +15,12 @@ dotenv.config();
 
 const app = express();
 
+// const app = express();
+
+// ✅ Must be before any routes
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // ✅ Enable CORS for all origins and methods
 app.use(cors({
   origin: '*', // <-- Allow all origins

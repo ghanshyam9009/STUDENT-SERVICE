@@ -166,7 +166,7 @@ export const updateAdminProfile = async (req, res) => {
 // Update subscription prices for plans
 export const updatePremiumPrices = async (req, res) => {
   try {
-    const { gold, platinum, silver } = req.body;
+    const {email, gold, platinum, silver } = req.body;
 
     // Basic validation - all three prices should be present and numbers
     if (
@@ -185,6 +185,7 @@ export const updatePremiumPrices = async (req, res) => {
     // We can store these prices as one item with a fixed id (e.g. subscription_id = 'default')
     const subscriptionItem = {
       subscription_id: "default", // static ID for single subscription record
+      email,
       gold: Number(gold),
       platinum: Number(platinum),
       silver: Number(silver),
