@@ -107,7 +107,8 @@ export const postJob = async (req, res) => {
       edit: null,
       status_verified: "notverified",
       edit_verified: null,
-      to_show_user: false
+      to_show_user: false,
+      is_premium: false
     };
 
     const task_id = uuidv4();
@@ -164,8 +165,13 @@ export const postJob = async (req, res) => {
   }
 };
 
+
+
 // -----------------------------------------
 // ✅ Post a Government Job
+// -----------------------------------------
+// -----------------------------------------
+// ✅ Post a Government Job (Visible & Verified by Default)
 // -----------------------------------------
 export const postGovernmentJob = async (req, res) => {
   try {
@@ -211,20 +217,37 @@ export const postGovernmentJob = async (req, res) => {
       qualifications: qualifications || [],
       application_deadline: application_deadline || null,
       contact_email: contact_email || null,
-      status: (job_status || "Open").charAt(0).toUpperCase() + (job_status || "Open").slice(1).toLowerCase(),
+      status:
+        (job_status || "Open").charAt(0).toUpperCase() +
+        (job_status || "Open").slice(1).toLowerCase(),
       created_at: timestamp,
       updated_at: timestamp,
-      posted_by: "admin"
+      posted_by: "admin",
+
+      // ✅ Visible & verified by default
+      to_show_user: true,
+      status_verified: "verified",
+      edit_verified: "verified",
+      is_premium: false,
+      edit: null
     };
 
-    await ddbDocClient.send(
-      new PutCommand({
-        TableName: GOV_JOB_TABLE,
-        Item: newGovJob
-      })
-    );
+    await Promise.all([
+      ddbDocClient.send(
+        new PutCommand({
+          TableName: GOV_JOB_TABLE,
+          Item: newGovJob
+        })
+      ),
+      ddbDocClient.send(
+        new PutCommand({
+          TableName: JOB_TABLE,
+          Item: newGovJob
+        })
+      )
+    ]);
 
-    // ✅ Send email notification to all students
+    // ✅ Notify all students
     const subject = `🏛️ New Government Job Posted: ${job_title}`;
     const textMsg = `A new government job in ${department_name} titled "${job_title}" is now open at ${location}.`;
     const htmlMsg = `
@@ -234,13 +257,13 @@ export const postGovernmentJob = async (req, res) => {
       <p><b>Location:</b> ${location}</p>
       <p><b>Employment Type:</b> ${employment_type}</p>
       <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
-      <p>Visit the portal to check details and apply.</p>
+      <p>Visit the portal to apply now.</p>
     `;
 
     notifyAllStudents(subject, textMsg, htmlMsg);
 
     return res.status(201).json({
-      message: "Government job posted successfully",
+      message: "Government job posted successfully (visible by default)",
       job_id,
       job: newGovJob
     });
@@ -248,6 +271,104 @@ export const postGovernmentJob = async (req, res) => {
   } catch (err) {
     console.error("Government Job Post Error:", err);
     return res.status(500).json({ error: "Failed to post government job" });
+  }
+};
+
+
+
+// -----------------------------------------
+// ✅ Post a Job by Admin (Normal Job Table but Auto-Verified)
+// -----------------------------------------
+export const postJobByAdmin = async (req, res) => {
+  try {
+    const {
+      job_title,
+      description,
+      location,
+      salary_range,
+      employment_type,
+      skills_required,
+      experience_required,
+      company_name,
+      work_mode,
+      responsibilities,
+      qualifications,
+      application_deadline,
+      contact_email,
+      job_status
+    } = req.body;
+
+    const admin_id = req.user?.admin_id || req.body.admin_id;
+
+    if (!admin_id || !job_title || !description || !location || !employment_type) {
+      return res.status(400).json({ error: "Required fields missing (admin_id, job_title, etc.)" });
+    }
+
+    const job_id = uuidv4();
+    const timestamp = new Date().toISOString();
+
+    const newAdminJob = {
+      job_id,
+      admin_id,
+      job_title,
+      company_name: company_name || null,
+      description,
+      location,
+      employment_type,
+      work_mode: work_mode || null,
+      salary_range: salary_range || null,
+      experience_required: experience_required || null,
+      skills_required: skills_required || [],
+      responsibilities: responsibilities || [],
+      qualifications: qualifications || [],
+      application_deadline: application_deadline || null,
+      contact_email: contact_email || null,
+      status:
+        (job_status || "Open").charAt(0).toUpperCase() +
+        (job_status || "Open").slice(1).toLowerCase(),
+      created_at: timestamp,
+      updated_at: timestamp,
+
+      // ✅ All permissions/flags enabled by default
+      to_show_user: true,
+      status_verified: "verified",
+      edit_verified: "verified",
+      is_premium: false,
+      posted_by: "admin",
+      edit: null
+    };
+
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: JOB_TABLE,
+        Item: newAdminJob
+      })
+    );
+
+    // ✅ Notify all students
+    const subject = `📢 New Job Posted by Admin: ${job_title}`;
+    const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "the admin"} at ${location}.`;
+    const htmlMsg = `
+      <h2>New Job Alert 🚀</h2>
+      <p><b>Job Title:</b> ${job_title}</p>
+      <p><b>Company:</b> ${company_name || "Not specified"}</p>
+      <p><b>Location:</b> ${location}</p>
+      <p><b>Employment Type:</b> ${employment_type}</p>
+      <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
+      <p>Log in now to apply!</p>
+    `;
+
+    notifyAllStudents(subject, textMsg, htmlMsg);
+
+    return res.status(201).json({
+      message: "Job posted successfully by admin (visible & verified)",
+      job_id,
+      job: newAdminJob
+    });
+
+  } catch (err) {
+    console.error("Admin Job Post Error:", err);
+    return res.status(500).json({ error: "Failed to post job by admin" });
   }
 };
 
@@ -309,6 +430,8 @@ export const updateGovernmentJob = async (req, res) => {
     return res.status(500).json({ error: "Failed to update government job" });
   }
 };
+
+
 
 
 export const updateJob = async (req, res) => {
@@ -405,6 +528,69 @@ export const updateJob = async (req, res) => {
   }
 };
 
+
+
+export const updateAdminJob = async (req, res) => {
+  try {
+    const { job_id } = req.params; // /admin-jobs/:job_id
+    const admin_id = req.user?.admin_id || req.body.admin_id;
+    const updates = req.body; // Fields to update
+
+    if (!job_id || !admin_id) {
+      return res.status(400).json({ error: "job_id and admin_id required" });
+    }
+
+    // Build dynamic update expression
+    let updateExp = "SET updated_at = :updated_at";
+    const exprAttrValues = { ":updated_at": new Date().toISOString(), ":admin_id": admin_id };
+    const exprAttrNames = {};
+
+    // Allowed updatable fields
+    const updatableFields = [
+      "job_title", "description", "location", "salary_range", "employment_type",
+      "skills_required", "experience_required", "company_name",
+      "work_mode", "responsibilities", "qualifications",
+      "application_deadline", "contact_email", "status"
+    ];
+
+    updatableFields.forEach((field) => {
+      if (updates[field] !== undefined) {
+        const key = `#${field}`;
+        const val = `:${field}`;
+        updateExp += `, ${key} = ${val}`;
+        exprAttrNames[key] = field;
+        exprAttrValues[val] = updates[field];
+      }
+    });
+
+    // If only updated_at is being set
+    if (Object.keys(exprAttrValues).length === 2) { // only updated_at and admin_id
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
+
+    // Update the job in JOB_TABLE
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression: updateExp,
+        ExpressionAttributeNames: exprAttrNames,
+        ExpressionAttributeValues: exprAttrValues,
+        ConditionExpression: "admin_id = :admin_id", // ✅ ensures only job's admin can update
+        ReturnValues: "ALL_NEW"
+      })
+    );
+
+    return res.status(200).json({ message: "Admin job updated successfully" });
+
+  } catch (err) {
+    console.error("Admin Job Update Error:", err);
+    if (err.name === "ConditionalCheckFailedException") {
+      return res.status(403).json({ error: "Unauthorized: Admin mismatch" });
+    }
+    return res.status(500).json({ error: "Failed to update admin job" });
+  }
+};
 
 
 
