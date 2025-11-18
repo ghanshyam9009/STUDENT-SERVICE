@@ -137,9 +137,9 @@ export const loginEmployer = async (req, res) => {
     const employer = result.Items[0];
 
     // ✅ Check if admin has approved the employer
-    if (employer.hasadminapproved === false) {
-      return res.status(403).json({ error: "Recruiter not approved" });
-    }
+    // if (employer.hasadminapproved === false) {
+    //   return res.status(403).json({ error: "Recruiter not approved" });
+    // }
 
     // Compare password
     const isMatch = await bcrypt.compare(password, employer.password);
@@ -219,7 +219,7 @@ export const updateEmployerProfile = async (req, res) => {
 
     const result = await ddbDocClient.send(
       new UpdateCommand({
-        TableName: process.env.USERS_TABLE,
+        TableName: process.env.EMPLOYER_TABLE,
         Key: { email },
         UpdateExpression: updateExp,
         ExpressionAttributeNames: exprAttrNames,

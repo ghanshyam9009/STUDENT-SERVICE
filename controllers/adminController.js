@@ -19,6 +19,7 @@ app.use(express.json());
 const ADMIN_TABLE = process.env.ADMIN_TABLE; // or process.env.ADMINS_TABLE if using a separate table
 const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
 const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE; // DynamoDB table name
+const STUDENT_TABLE = process.env.USERS_TABLE
 // ✅ Register Admin
 export const registerAdmin = async (req, res) => {
   try {
@@ -271,6 +272,27 @@ export const getAllRecruiters = async (req, res) => {
     const result = await ddbDocClient.send(
       new ScanCommand({
         TableName: EMPLOYER_TABLE
+      })
+    );
+
+    const recruiters = result.Items || [];
+
+    return res.status(200).json({
+      count: recruiters.length,
+      recruiters
+    });
+  } catch (error) {
+    console.error("Error fetching recruiters:", error);
+    return res.status(500).json({ error: "Failed to fetch recruiters" });
+  }
+};
+
+
+export const getAllcandidates = async (req, res) => {
+  try {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: STUDENT_TABLE
       })
     );
 

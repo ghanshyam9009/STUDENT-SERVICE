@@ -6,6 +6,7 @@ import {
   updatePremiumPrices,
   approveRecruiter,
   getAllRecruiters,
+  getAllcandidates
 } from "../controllers/adminController.js";
 
 const router = express.Router();
@@ -23,5 +24,6 @@ router.put("/update/:email", updateAdminProfile);
 router.put("/updates/premium-pricess",updatePremiumPrices );
 router.put("/approved-recruiter", approveRecruiter);
 router.get("/get-all-recruiter",getAllRecruiters)
+router.get("/get-all-candidates",getAllcandidates)
 
 export default router;

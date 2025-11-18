@@ -1,130 +1,4 @@
-// import {
-//   PutCommand,
-//   ScanCommand,
-//   UpdateCommand
-// } from "@aws-sdk/lib-dynamodb";
-// import ddbDocClient from "../config/db.js";
-// import dotenv from "dotenv";
-// import { v4 as uuidv4 } from "uuid";
 
-// dotenv.config();
-
-// const APPLICATION_TABLE = process.env.APPLICATION_TABLE;
-// const JOB_TABLE         = process.env.JOB_TABLE;        // to verify job exists
-// const APPLIED_TABLE     = process.env.APPLIED_TABLE;    // 🔹 new appliedjob table
-// const USER_TABLE     = process.env.USERS_TABLE;    // 🔹 student table to increment count
-
-// // -----------------------------------------
-// // ✅ Apply for a Job
-// // -----------------------------------------
-// export const applyForJob = async (req, res) => {
-//   try {
-//     const { job_id } = req.params;
-//     const { resume_url, cover_letter } = req.body;
-//     const student_id = req.user?.student_id || req.body.student_id;
-
-//     if (!student_id || !job_id) {
-//       return res.status(400).json({ error: "student_id and job_id are required" });
-//     }
-
-//     // 🔹 Check if job exists
-//     const jobResult = await ddbDocClient.send(
-//       new ScanCommand({
-//         TableName: JOB_TABLE,
-//         FilterExpression: "job_id = :job_id",
-//         ExpressionAttributeValues: { ":job_id": job_id }
-//       })
-//     );
-
-//     if (!jobResult.Items || jobResult.Items.length === 0) {
-//       return res.status(404).json({ error: "Job not found" });
-//     }
-
-//     const job = jobResult.Items[0];
-
-//     // 🔹 Prevent duplicate application
-//     const existing = await ddbDocClient.send(
-//       new ScanCommand({
-//         TableName: APPLICATION_TABLE,
-//         FilterExpression: "job_id = :job_id AND student_id = :student_id",
-//         ExpressionAttributeValues: {
-//           ":job_id": job_id,
-//           ":student_id": student_id
-//         }
-//       })
-//     );
-
-//     if (existing.Items && existing.Items.length > 0) {
-//       return res.status(400).json({ error: "You have already applied for this job" });
-//     }
-
-//     const application_id = uuidv4();
-//     const applied_id     = uuidv4(); // entry ID for appliedjob table
-//     const timestamp      = new Date().toISOString();
-
-//     const newApplication = {
-//       application_id,
-//       job_id,
-//       employer_id: job.employer_id,
-//       student_id,
-//       resume_url: resume_url || null,
-//       cover_letter: cover_letter || null,
-//       status: "Pending",
-//       created_at: timestamp,
-//       updated_at: timestamp
-//     };
-
-//     // ✅ 1. Create record in APPLICATION_TABLE
-//     await ddbDocClient.send(
-//       new PutCommand({
-//         TableName: APPLICATION_TABLE,
-//         Item: newApplication
-//       })
-//     );
-
-//     // ✅ 2. Create entry in APPLIED_TABLE
-//     const appliedItem = {
-//       applied_id,
-//       job_id,
-//       user_id: student_id,
-//       application_id,
-//       duration: timestamp,      // you can store duration or applied date
-//       created_at: timestamp
-//     };
-
-//     await ddbDocClient.send(
-//       new PutCommand({
-//         TableName: APPLIED_TABLE,
-//         Item: appliedItem
-//       })
-//     );
-
-//     // ✅ 3. Increment applied job count in STUDENT_TABLE
-//     await ddbDocClient.send(
-//       new UpdateCommand({
-//         TableName: USER_TABLE,
-//         Key: { student_id },                 // assumes student_id is the PK
-//         UpdateExpression:
-//           "SET applied_jobs_count = if_not_exists(applied_jobs_count, :zero) + :inc",
-//         ExpressionAttributeValues: {
-//           ":inc": 1,
-//           ":zero": 0
-//         }
-//       })
-//     );
-
-//     return res.status(201).json({
-//       message: "Application submitted successfully",
-//       application_id,
-//       application: newApplication,
-//       applied_entry: appliedItem
-//     });
-
-//   } catch (err) {
-//     console.error("Job Application Error:", err);
-//     return res.status(500).json({ error: "Failed to apply for job" });
-//   }
-// };
 
 
 import {
@@ -135,6 +9,15 @@ import ddbDocClient from "../config/db.js";
 import dotenv from "dotenv";
 import { v4 as uuidv4 } from "uuid";
 
+
+
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
+
+const ddbClient = new DynamoDBClient({});
+const ddbDoc = DynamoDBDocumentClient.from(ddbClient);
+
+
 dotenv.config();
 
 const APPLICATION_TABLE = process.env.APPLICATION_TABLE;
@@ -142,7 +25,8 @@ const JOB_TABLE         = process.env.JOB_TABLE;
 const APPLIED_TABLE     = process.env.APPLIED_TABLE;
 const USER_TABLE        = process.env.USERS_TABLE;
 const TASK_TABLE        = process.env.TASK_TABLE;
-
+const GOV_JOB_APPLICATION_TABLE = process.env.GOV_JOB_TABLE
+const JOB_GSI_NAME = "job_id-index"; 
 // -----------------------------------------
 // ✅ Apply for a Job
 // -----------------------------------------
@@ -261,5 +145,241 @@ export const applyForJob = async (req, res) => {
   } catch (err) {
     console.error("Job Application Error:", err);
     return res.status(500).json({ error: "Failed to apply for job" });
+  }
+};
+
+
+
+
+
+
+export const applyForGovernmentJob = async (req, res) => {
+  try {
+    const { job_id } = req.params;
+    const { resume_url, cover_letter } = req.body;
+    const student_id = req.user?.student_id || req.body.student_id;
+
+    if (!student_id || !job_id) {
+      return res.status(400).json({ error: "student_id and job_id are required" });
+    }
+
+    // 🔹 Check if govt job exists
+    const jobResult = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: GOV_JOB_APPLICATION_TABLE,
+        FilterExpression: "job_id = :job_id",
+        ExpressionAttributeValues: { ":job_id": job_id }
+      })
+    );
+
+    if (!jobResult.Items || jobResult.Items.length === 0) {
+      return res.status(404).json({ error: "Government job not found" });
+    }
+    const job = jobResult.Items[0];
+
+    // 🔹 Prevent duplicate government application
+    const existing = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: APPLICATION_TABLE,
+        FilterExpression: "job_id = :job_id AND student_id = :student_id",
+        ExpressionAttributeValues: {
+          ":job_id": job_id,
+          ":student_id": student_id
+        }
+      })
+    );
+
+    if (existing.Items?.length > 0) {
+      return res.status(400).json({ error: "You already applied for this govt job" });
+    }
+
+    const timestamp = new Date().toISOString();
+    const application_id = uuidv4();
+    const applied_id     = uuidv4();
+
+    // 🔹 Application item
+    const newApplication = {
+      application_id,
+      job_id,
+      student_id,
+      resume_url: resume_url || null,
+      cover_letter: cover_letter || null,
+      status: "Pending",
+      status_verified: "not_verified",  // ✔
+      to_show_user: false,          // ✔
+      to_show_recruiter: false,     // ✔
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: APPLICATION_TABLE,
+        Item: newApplication
+      })
+    );
+
+    // 🔹 Record that student applied
+    const appliedItem = {
+      applied_id,
+      job_id,
+      user_id: student_id,
+      application_id,
+      duration: timestamp,
+      created_at: timestamp
+    };
+
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: APPLIED_TABLE,
+        Item: appliedItem
+      })
+    );
+
+    return res.status(201).json({
+      message: "Government job application submitted",
+      application_id,
+      application: newApplication,
+      applied_entry: appliedItem
+    });
+
+  } catch (err) {
+    console.error("Gov Job Application Error:", err);
+    return res.status(500).json({ error: "Failed to apply for government job" });
+  }
+};
+
+
+
+
+
+export const applyForAdminJob = async (req, res) => {
+  try {
+    const { job_id } = req.params;
+    const { resume_url, cover_letter } = req.body;
+
+    const student_id = req.user?.student_id || req.body.student_id;
+
+    if (!student_id || !job_id) {
+      return res.status(400).json({ error: "student_id and job_id are required" });
+    }
+
+    // 🔹 Check if job exists
+    const jobResult = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: JOB_TABLE,
+        FilterExpression: "job_id = :job_id",
+        ExpressionAttributeValues: { ":job_id": job_id }
+      })
+    );
+
+    if (!jobResult.Items || jobResult.Items.length === 0) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    const job = jobResult.Items[0];
+
+    // 🔹 Prevent duplicate application
+    const existing = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: APPLICATION_TABLE,
+        FilterExpression: "job_id = :job_id AND student_id = :student_id",
+        ExpressionAttributeValues: {
+          ":job_id": job_id,
+          ":student_id": student_id
+        }
+      })
+    );
+
+    if (existing.Items?.length > 0) {
+      return res.status(400).json({ error: "You already applied for this job" });
+    }
+
+    const timestamp = new Date().toISOString();
+    const application_id = uuidv4();
+    const applied_id     = uuidv4();
+
+    // 🔹 Application record (NO task, VERIFIED, hidden)
+    const newApplication = {
+      application_id,
+      job_id,
+      student_id,
+      employer_id: job.employer_id || null,
+      resume_url: resume_url || null,
+      cover_letter: cover_letter || null,
+      status: "Pending",
+      status_verified: "verified",   // ✔
+      to_show_user: false,           // ✔
+      to_show_recruiter: false,      // ✔
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: APPLICATION_TABLE,
+        Item: newApplication
+      })
+    );
+
+    // 🔹 Applied record
+    const appliedItem = {
+      applied_id,
+      job_id,
+      user_id: student_id,
+      application_id,
+      duration: timestamp,
+      created_at: timestamp
+    };
+
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: APPLIED_TABLE,
+        Item: appliedItem
+      })
+    );
+
+    return res.status(201).json({
+      message: "Admin job application submitted",
+      application_id,
+      application: newApplication,
+      applied_entry: appliedItem
+    });
+
+  } catch (err) {
+    console.error("Admin Job Application Error:", err);
+    return res.status(500).json({ error: "Failed to apply for admin job" });
+  }
+};
+
+
+export const applications = async (req, res) => {
+  try {
+    const job_id = req.params.job_id;  // ✅ FIXED
+
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    const result = await ddbDoc.send(
+      new QueryCommand({
+        TableName: APPLICATION_TABLE,
+        IndexName: JOB_GSI_NAME,
+        KeyConditionExpression: "job_id = :jid",
+        ExpressionAttributeValues: {
+          ":jid": job_id,
+        },
+        ScanIndexForward: false
+      })
+    );
+
+    return res.json({
+      count: result.Items?.length || 0,
+      job_id,
+      applications: result.Items || []
+    });
+
+  } catch (err) {
+    console.error("Error fetching applications:", err);
+    return res.status(500).json({ error: "Failed to fetch applications" });
   }
 };

@@ -80,6 +80,33 @@ export const postJob = async (req, res) => {
       return res.status(400).json({ error: "Required fields missing" });
     }
 
+
+    const employerResult = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: EMPLOYER_TABLE,
+        FilterExpression: "employer_id = :eid",
+        ExpressionAttributeValues: {
+          ":eid": employer_id
+        }
+      })
+    );
+
+    if (!employerResult.Items || employerResult.Items.length === 0) {
+      return res.status(404).json({ error: "Employer not found" });
+    }
+
+    const employer = employerResult.Items[0];
+
+    // ❌ If admin has NOT approved recruiter → stop posting
+    if (!employer.hasadminapproved) {
+      return res.status(403).json({
+        error: "Your recruiter account is not approved by admin. You cannot post jobs."
+      });
+    }
+
+
+
+    
     const job_id = uuidv4();
     const timestamp = new Date().toISOString();
 
@@ -167,12 +194,7 @@ export const postJob = async (req, res) => {
 
 
 
-// -----------------------------------------
-// ✅ Post a Government Job
-// -----------------------------------------
-// -----------------------------------------
-// ✅ Post a Government Job (Visible & Verified by Default)
-// -----------------------------------------
+
 export const postGovernmentJob = async (req, res) => {
   try {
     const {
@@ -275,10 +297,6 @@ export const postGovernmentJob = async (req, res) => {
 };
 
 
-
-// -----------------------------------------
-// ✅ Post a Job by Admin (Normal Job Table but Auto-Verified)
-// -----------------------------------------
 export const postJobByAdmin = async (req, res) => {
   try {
     const {
@@ -632,5 +650,85 @@ export const markJobPremium = async (req, res) => {
   } catch (error) {
     console.error("Error updating premium_job:", error);
     return res.status(500).json({ error: "Failed to update premium status for job" });
+  }
+};
+
+
+
+
+
+export const closeGovernmentJob = async (req, res) => {
+  try {
+    const { job_id } = req.body;
+
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    const timestamp = new Date().toISOString();
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: GOV_JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression:
+          "set #status = :closed, to_show_user = :hide, updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#status": "status"
+        },
+        ExpressionAttributeValues: {
+          ":closed": "Closed",
+          ":hide": false,
+          ":updated_at": timestamp
+        }
+      })
+    );
+
+    return res.status(200).json({
+      message: "Government job closed & hidden successfully",
+      job_id
+    });
+  } catch (err) {
+    console.error("Close Government Job Error:", err);
+    return res.status(500).json({ error: "Failed to close government job" });
+  }
+};
+
+
+
+export const closeAdminJob = async (req, res) => {
+  try {
+    const { job_id } = req.body;
+
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    const timestamp = new Date().toISOString();
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression:
+          "set #status = :closed, to_show_user = :hide, updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#status": "status"
+        },
+        ExpressionAttributeValues: {
+          ":closed": "Closed",
+          ":hide": false,
+          ":updated_at": timestamp
+        }
+      })
+    );
+
+    return res.status(200).json({
+      message: "Admin job closed & hidden successfully",
+      job_id
+    });
+  } catch (err) {
+    console.error("Close Admin Job Error:", err);
+    return res.status(500).json({ error: "Failed to close admin job" });
   }
 };

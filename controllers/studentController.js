@@ -177,6 +177,9 @@ export const updateProfile = async (req, res) => {
   }
 };
 
+
+
+
 export const markStudentPremium = async (req, res) => {
   try {
     const { email, is_premium, plan } = req.body;
