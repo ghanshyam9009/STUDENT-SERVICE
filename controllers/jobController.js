@@ -16,6 +16,7 @@ const JOB_TABLE = process.env.JOB_TABLE;
 const GOV_JOB_TABLE = process.env.GOV_JOB_TABLE;
 const TASK_TABLE = process.env.TASK_TABLE;
 const USERS_TABLE = process.env.USERS_TABLE; // ✅ students table
+const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE
 
 // -----------------------------------------
 // ✅ Helper: Send job notification to all students
@@ -83,7 +84,7 @@ export const postJob = async (req, res) => {
 
     const employerResult = await ddbDocClient.send(
       new ScanCommand({
-        TableName: JOB_TABLE,
+        TableName: EMPLOYER_TABLE,
         FilterExpression: "employer_id = :eid",
         ExpressionAttributeValues: {
           ":eid": employer_id
