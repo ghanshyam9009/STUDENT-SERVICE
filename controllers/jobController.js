@@ -83,7 +83,7 @@ export const postJob = async (req, res) => {
 
     const employerResult = await ddbDocClient.send(
       new ScanCommand({
-        TableName: EMPLOYER_TABLE,
+        TableName: JOB_TABLE,
         FilterExpression: "employer_id = :eid",
         ExpressionAttributeValues: {
           ":eid": employer_id
