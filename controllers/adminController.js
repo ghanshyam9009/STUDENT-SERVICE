@@ -310,7 +310,7 @@ export const getAllcandidates = async (req, res) => {
 
 
 
-import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+
 
 export const blockStudentByAdmin = async (req, res) => {
   try {
