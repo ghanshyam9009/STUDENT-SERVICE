@@ -29,11 +29,8 @@ export const registerStudent = async (req, res) => {
       return res.status(400).json({ error: "Required fields missing" });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     const timestamp = new Date().toISOString();
-
-    // user_id = timestamp string for uniqueness
     const user_id = Date.now().toString();
 
     const newUser = {
@@ -44,6 +41,7 @@ export const registerStudent = async (req, res) => {
       phone_number,
       role,
       status: "Active",
+      is_admin_closed: false,       // 👈 NEW FIELD
       created_at: timestamp,
       updated_at: timestamp,
     };
@@ -62,51 +60,56 @@ export const registerStudent = async (req, res) => {
   }
 };
 
+
 // ✅ Login Student
 export const loginStudent = async (req, res) => {
-    try {
-      const { email, password } = req.body;
-  
-      if (!email || !password) {
-        return res.status(400).json({ error: "Email and password are required" });
-      }
-  
-      // 🔹 Scan table to find user by email
-      const result = await ddbDocClient.send(
-        new ScanCommand({
-          TableName: USERS_TABLE,
-          FilterExpression: "email = :email",
-          ExpressionAttributeValues: {
-            ":email": email
-          }
-        })
-      );
-  
-      if (!result.Items || result.Items.length === 0) {
-        return res.status(404).json({ error: "User not found" });
-      }
-  
-      const user = result.Items[0];
-  
-      // Compare password
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ error: "Invalid credentials" });
-      }
-  
-      // Generate JWT
-      const token = jwt.sign(
-        { user_id: user.user_id, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: "1d" }
-      );
-  
-      return res.json({ message: "Login successful", token, user });
-    } catch (err) {
-      console.error("Login Error:", err);
-      return res.status(500).json({ error: "Login failed" });
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
     }
-  };
+
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: USERS_TABLE,
+        FilterExpression: "email = :email",
+        ExpressionAttributeValues: { ":email": email }
+      })
+    );
+
+    if (!result.Items || result.Items.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const user = result.Items[0];
+
+    // Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
+
+    // 🛑 Check if admin disabled the account
+    if (user.is_admin_closed === true) {
+      return res.status(403).json({
+        error: "Your account is blocked or deleted by admin",
+      });
+    }
+
+    // 🟢 Generate JWT Token for allowed users
+    const token = jwt.sign(
+      { user_id: user.user_id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    return res.json({ message: "Login successful", token, user });
+  } catch (err) {
+    console.error("Login Error:", err);
+    return res.status(500).json({ error: "Login failed" });
+  }
+};
 
 
 

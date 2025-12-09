@@ -136,7 +136,9 @@ export const postJob = async (req, res) => {
       status_verified: "notverified",
       edit_verified: null,
       to_show_user: false,
-      is_premium: false
+      is_premium: false,
+      job_type : "PRIVATE",
+      posted_by : "RECRUITER"
     };
 
     const task_id = uuidv4();
@@ -245,7 +247,8 @@ export const postGovernmentJob = async (req, res) => {
         (job_status || "Open").slice(1).toLowerCase(),
       created_at: timestamp,
       updated_at: timestamp,
-      posted_by: "admin",
+      job_type : "GOVERNMENT",
+      posted_by : "ADMIN",
 
       // ✅ Visible & verified by default
       to_show_user: true,
@@ -353,7 +356,8 @@ export const postJobByAdmin = async (req, res) => {
       status_verified: "verified",
       edit_verified: "verified",
       is_premium: false,
-      posted_by: "admin",
+      job_type : "ADMIN",
+      posted_by : "RECRUITER",
       edit: null
     };
 
@@ -726,6 +730,45 @@ export const closeAdminJob = async (req, res) => {
 
     return res.status(200).json({
       message: "Admin job closed & hidden successfully",
+      job_id
+    });
+  } catch (err) {
+    console.error("Close Admin Job Error:", err);
+    return res.status(500).json({ error: "Failed to close admin job" });
+  }
+};
+
+
+
+export const closeRecruiterJob = async (req, res) => {
+  try {
+    const { job_id } = req.body;
+
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    const timestamp = new Date().toISOString();
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression:
+          "set #status = :closed, to_show_user = :hide, updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#status": "status"
+        },
+        ExpressionAttributeValues: {
+          ":closed": "Closed",
+          ":hide": false,
+          ":updated_at": timestamp
+        }
+      })
+    );
+
+    return res.status(200).json({
+      message: "job is closed by recuriter ",
       job_id
     });
   } catch (err) {

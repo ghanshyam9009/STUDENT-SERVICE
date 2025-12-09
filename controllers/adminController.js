@@ -309,3 +309,59 @@ export const getAllcandidates = async (req, res) => {
 };
 
 
+
+import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+
+export const blockStudentByAdmin = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "email is required" });
+    }
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: USERS_TABLE,
+        Key: { email },
+        UpdateExpression: "SET is_admin_closed = :val",
+        ExpressionAttributeValues: {
+          ":val": true,
+        },
+      })
+    );
+
+    return res.json({ message: "Student has been blocked by admin" });
+  } catch (err) {
+    console.error("Block Student Error:", err);
+    return res.status(500).json({ error: "Failed to block student" });
+  }
+};
+
+
+
+export const blockEmployerByAdmin = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "email is required" });
+    }
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: EMPLOYER_TABLE,
+        Key: { email },
+        UpdateExpression: "SET is_admin_closed = :val",
+        ExpressionAttributeValues: {
+          ":val": true,
+        },
+      })
+    );
+
+    return res.json({ message: "Employer has been blocked by admin" });
+  } catch (err) {
+    console.error("Block Employer Error:", err);
+    return res.status(500).json({ error: "Failed to block employer" });
+  }
+};

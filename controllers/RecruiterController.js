@@ -53,14 +53,11 @@ export const registerEmployer = async (req, res) => {
       return res.status(400).json({ error: "Required fields missing" });
     }
 
-    // Check if employer already exists (by email)
     const existing = await ddbDocClient.send(
       new ScanCommand({
         TableName: EMPLOYER_TABLE,
         FilterExpression: "email = :email",
-        ExpressionAttributeValues: {
-          ":email": email
-        }
+        ExpressionAttributeValues: { ":email": email }
       })
     );
 
@@ -70,7 +67,7 @@ export const registerEmployer = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const timestamp = new Date().toISOString();
-    const employer_id = Date.now().toString(); // or use uuid.v4()
+    const employer_id = Date.now().toString();
 
     const newEmployer = {
       employer_id,
@@ -85,7 +82,7 @@ export const registerEmployer = async (req, res) => {
       location: location || null,
       description: description || null,
       status: "Active",
-      hasadminapproved: false,
+      is_admin_closed: false,     // 👈 NEW FIELD ADDED
       created_at: timestamp,
       updated_at: timestamp,
       role: "Employer"
@@ -108,6 +105,7 @@ export const registerEmployer = async (req, res) => {
   }
 };
 
+
 // -----------------------------------------
 // ✅ Login Employer
 // -----------------------------------------
@@ -119,14 +117,11 @@ export const loginEmployer = async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Find employer by email
     const result = await ddbDocClient.send(
       new ScanCommand({
         TableName: EMPLOYER_TABLE,
         FilterExpression: "email = :email",
-        ExpressionAttributeValues: {
-          ":email": email
-        }
+        ExpressionAttributeValues: { ":email": email }
       })
     );
 
@@ -136,18 +131,18 @@ export const loginEmployer = async (req, res) => {
 
     const employer = result.Items[0];
 
-    // ✅ Check if admin has approved the employer
-    // if (employer.hasadminapproved === false) {
-    //   return res.status(403).json({ error: "Recruiter not approved" });
-    // }
-
-    // Compare password
     const isMatch = await bcrypt.compare(password, employer.password);
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
 
-    // Generate JWT
+    // 🛑 Check admin status
+    if (employer.is_admin_closed === true) {
+      return res.status(403).json({
+        error: "Your account is blocked or deleted by admin",
+      });
+    }
+
     const token = jwt.sign(
       { employer_id: employer.employer_id, role: "Employer" },
       process.env.JWT_SECRET,
