@@ -110,3 +110,71 @@ export const resetPassword = async (req, res) => {
     return res.status(500).json({ error: "Failed to reset password" });
   }
 };
+
+
+// Registration OTP
+export const sendRegistrationOtp = async (req, res) => {
+  try {
+    const { email, role } = req.body;
+
+    if (!email || !role)
+      return res.status(400).json({ error: "Email and role are required" });
+
+    const tableName = getTableByRole(role);
+
+    // Check if user already exists
+    const user = await ddbDocClient.send(new GetCommand({
+      TableName: tableName,
+      Key: { email },
+    }));
+
+    // FOR REGISTRATION → user must NOT exist
+    if (user.Item)
+      return res.status(400).json({ error: "User already exists" });
+
+    // Generate OTP
+    const otp = generateOtp();
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+
+    otpStore[`reg-${role}-${email}`] = { otp, expiresAt };
+
+    await sendEmail({
+      to: email,
+      subject: "Registration OTP",
+      text: `Your OTP is ${otp}.`,
+    });
+
+    return res.json({ message: "Registration OTP sent" });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to send OTP" });
+  }
+};
+
+
+
+export const verifyRegistrationOtp = async (req, res) => {
+  try {
+    const { email, role, otp } = req.body;
+
+    const key = `reg-${role}-${email}`;
+
+    const record = otpStore[key];
+    if (!record) return res.status(400).json({ error: "OTP not found or expired" });
+
+    if (record.expiresAt < Date.now()) {
+      delete otpStore[key];
+      return res.status(400).json({ error: "OTP expired" });
+    }
+
+    if (record.otp !== otp)
+      return res.status(400).json({ error: "Invalid OTP" });
+
+    return res.json({ message: "OTP verified" });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to verify OTP" });
+  }
+};
