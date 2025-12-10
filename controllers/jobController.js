@@ -356,8 +356,8 @@ export const postJobByAdmin = async (req, res) => {
       status_verified: "verified",
       edit_verified: "verified",
       is_premium: false,
-      job_type : "ADMIN",
-      posted_by : "RECRUITER",
+      job_type : "PRIVATE",
+      posted_by : "ADMIN",
       edit: null
     };
 
