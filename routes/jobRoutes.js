@@ -1,11 +1,19 @@
 import express from "express";
-import { closeRecruiterJob,postJob ,postGovernmentJob,updateGovernmentJob,updateJob,postJobByAdmin,updateAdminJob, closeGovernmentJob, closeAdminJob} from "../controllers/jobController.js";
+import { uploadJobLogo,upload ,closeRecruiterJob,postJob ,postGovernmentJob,updateGovernmentJob,updateJob,postJobByAdmin,updateAdminJob, closeGovernmentJob, closeAdminJob} from "../controllers/jobController.js";
 // import { verifyEmployerAuth } from "../middleware/auth.js"; // optional JWT middleware
+// import { upload } from "../utils/multer.js"; // ✅ same multer used elsewhere
+
 
 const router = express.Router();
 
 // POST /api/jobs
 router.post("/jobs", postJob);
+router.put(
+    "/jobs/:job_id/logo",
+    upload.single("logo"),
+    uploadJobLogo
+  );
+  
 router.post("/jobsadmin", postJobByAdmin);
 router.post("/Govtjobs", postGovernmentJob);
 

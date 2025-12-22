@@ -3,7 +3,8 @@ import {
   registerEmployer,
   loginEmployer,
   updateEmployerProfile,
-  upload
+  upload,
+  updateLogo
 } from "../controllers/RecruiterController.js";
 
 import multer from "multer";
@@ -23,5 +24,12 @@ router.post("/login", loginEmployer);
 router.put("/update/:email", updateEmployerProfile);
 
 router.put("/update/:email/kyc", upload.single("document"), updateEmployerProfile);
+
+router.put(
+  "/profile/:email/logo",
+  // verifyToken,
+  upload.single("logo"),
+  updateLogo
+);
 
 export default router;

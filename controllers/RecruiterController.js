@@ -232,3 +232,64 @@ export const updateEmployerProfile = async (req, res) => {
     return res.status(500).json({ error: "Employer profile update failed" });
   }
 };
+
+
+
+export const updateLogo = async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Logo file is required" });
+    }
+
+    // ✅ Allow only images
+    if (!req.file.mimetype.startsWith("image/")) {
+      return res.status(400).json({ error: "Only image files are allowed" });
+    }
+
+    const file = req.file;
+    const fileExt = path.extname(file.originalname);
+    const fileName = `logos/${email}_${Date.now()}${fileExt}`;
+
+    // Upload to S3
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET,
+        Key: fileName,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+      })
+    );
+
+    const logoUrl = `https://${process.env.KYC_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+
+    // Update ONLY logo field in DynamoDB
+    const result = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: process.env.EMPLOYER_TABLE,
+        Key: { email },
+        UpdateExpression: "SET #logo = :logo, #updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#logo": "logo",
+          "#updated_at": "updated_at",
+        },
+        ExpressionAttributeValues: {
+          ":logo": logoUrl,
+          ":updated_at": new Date().toISOString(),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.json({
+      message: "Logo updated successfully",
+      logo: logoUrl,
+      profile: result.Attributes,
+    });
+
+  } catch (err) {
+    console.error("Logo Update Error:", err);
+    return res.status(500).json({ error: "Logo update failed" });
+  }
+};

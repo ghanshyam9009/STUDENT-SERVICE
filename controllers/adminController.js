@@ -313,16 +313,16 @@ export const getAllcandidates = async (req, res) => {
 
 export const blockEmployerByAdmin = async (req, res) => {
   try {
-    const { employer_id } = req.body;
+    const { email } = req.body;
 
-    if (!employer_id) {
+    if (!email) {
       return res.status(400).json({ error: "employer_id is required" });
     }
 
     await ddbDocClient.send(
       new UpdateCommand({
         TableName: EMPLOYER_TABLE,
-        Key: { employer_id },
+        Key: { email },
         UpdateExpression: "SET is_admin_closed = :val",
         ExpressionAttributeValues: {
           ":val": true,
