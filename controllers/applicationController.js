@@ -545,3 +545,35 @@ export const applications = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch applications" });
   }
 };
+
+
+
+
+export const getApplicationsByJobId = async (req, res) => {
+  const jobId = req.query.job_id;
+
+  if (!jobId) {
+    return res.status(400).json({ message: "job_id is required" });
+  }
+
+  const params = {
+    TableName: "application",
+    IndexName: "job_id-index",
+    KeyConditionExpression: "job_id = :jobId",
+    ExpressionAttributeValues: {
+      ":jobId": jobId
+    }
+  };
+
+  try {
+    const data = await docClient.send(new QueryCommand(params));
+
+    res.json({
+      job_id: jobId,
+      count: data.Count,
+      applications: data.Items
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
