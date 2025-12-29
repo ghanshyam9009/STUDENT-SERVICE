@@ -255,7 +255,7 @@ export const updateLogo = async (req, res) => {
     // Upload to S3
     await s3Client.send(
       new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET,
+        Bucket: process.env.KYC_BUCKET,
         Key: fileName,
         Body: file.buffer,
         ContentType: file.mimetype,
