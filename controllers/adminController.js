@@ -311,12 +311,69 @@ export const getAllcandidates = async (req, res) => {
 
 
 
+// export const blockEmployerByAdmin = async (req, res) => {
+//   try {
+//     const { email } = req.body;
+
+//     if (!email) {
+//       return res.status(400).json({ error: "employer_id is required" });
+//     }
+
+//     await ddbDocClient.send(
+//       new UpdateCommand({
+//         TableName: EMPLOYER_TABLE,
+//         Key: { email },
+//         UpdateExpression: "SET is_admin_closed = :val",
+//         ExpressionAttributeValues: {
+//           ":val": true,
+//         },
+//       })
+//     );
+
+//     return res.json({ message: "Employer has been blocked by admin" });
+//   } catch (err) {
+//     console.error("Block Employer Error:", err);
+//     return res.status(500).json({ error: "Failed to block employer" });
+//   }
+// };
+
+
+// // import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+
+// export const blockStudentByAdmin = async (req, res) => {
+//   try {
+//     const { email } = req.body;
+
+//     if (!email) {
+//       return res.status(400).json({ error: "user_id is required" });
+//     }
+
+//     await ddbDocClient.send(
+//       new UpdateCommand({
+//         TableName: STUDENT_TABLE,
+//         Key: { email },
+//         UpdateExpression: "SET is_admin_closed = :val",
+//         ExpressionAttributeValues: {
+//           ":val": true,
+//         },
+//       })
+//     );
+
+//     return res.json({ message: "Student has been blocked by admin" });
+//   } catch (err) {
+//     console.error("Block Student Error:", err);
+//     return res.status(500).json({ error: "Failed to block student" });
+//   }
+// };
+
+// import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+
 export const blockEmployerByAdmin = async (req, res) => {
   try {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ error: "employer_id is required" });
+      return res.status(400).json({ error: "email is required" });
     }
 
     await ddbDocClient.send(
@@ -330,22 +387,21 @@ export const blockEmployerByAdmin = async (req, res) => {
       })
     );
 
-    return res.json({ message: "Employer has been blocked by admin" });
+    return res.status(200).json({
+      message: "Employer has been blocked by admin",
+    });
   } catch (err) {
     console.error("Block Employer Error:", err);
     return res.status(500).json({ error: "Failed to block employer" });
   }
 };
 
-
-// import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
-
 export const blockStudentByAdmin = async (req, res) => {
   try {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ error: "user_id is required" });
+      return res.status(400).json({ error: "email is required" });
     }
 
     await ddbDocClient.send(
@@ -359,7 +415,9 @@ export const blockStudentByAdmin = async (req, res) => {
       })
     );
 
-    return res.json({ message: "Student has been blocked by admin" });
+    return res.status(200).json({
+      message: "Student has been blocked by admin",
+    });
   } catch (err) {
     console.error("Block Student Error:", err);
     return res.status(500).json({ error: "Failed to block student" });
