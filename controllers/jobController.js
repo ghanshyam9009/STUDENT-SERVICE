@@ -81,6 +81,147 @@ const notifyAllStudents = async (subject, message, htmlContent) => {
 
 
 
+// export const postJob = async (req, res) => {
+//   try {
+//     const {
+//       job_title,
+//       description,
+//       location,
+//       salary_range,
+//       employment_type,
+//       skills_required,
+//       experience_required,
+//       company_name,
+//       work_mode,
+//       responsibilities,
+//       qualifications,
+//       application_deadline,
+//       contact_email,
+//       job_status
+//     } = req.body;
+
+//     const employer_id = req.user?.employer_id || req.body.employer_id;
+
+//     if (!employer_id || !job_title || !description || !location || !employment_type) {
+//       return res.status(400).json({ error: "Required fields missing" });
+//     }
+
+
+//     const employerResult = await ddbDocClient.send(
+//       new ScanCommand({
+//         TableName: EMPLOYER_TABLE,
+//         FilterExpression: "employer_id = :eid",
+//         ExpressionAttributeValues: {
+//           ":eid": employer_id
+//         }
+//       })
+//     );
+
+//     if (!employerResult.Items || employerResult.Items.length === 0) {
+//       return res.status(404).json({ error: "Employer not found" });
+//     }
+
+//     const employer = employerResult.Items[0];
+
+//     // ❌ If admin has NOT approved recruiter → stop posting
+//     if (!employer.hasadminapproved) {
+//       return res.status(403).json({
+//         error: "Your recruiter account is not approved by admin. You cannot post jobs."
+//       });
+//     }
+
+
+
+    
+//     const job_id = uuidv4();
+//     const timestamp = new Date().toISOString();
+
+//     const newJob = {
+//       job_id,
+//       employer_id,
+//       job_title,
+//       company_name: company_name || null,
+//       description,
+//       location,
+//       employment_type,
+//       work_mode: work_mode || null,
+//       salary_range: salary_range || null,
+//       experience_required: experience_required || null,
+//       skills_required: skills_required || [],
+//       responsibilities: responsibilities || [],
+//       qualifications: qualifications || [],
+//       application_deadline: application_deadline || null,
+//       contact_email: contact_email || null,
+//       status:
+//         (job_status || "Open").charAt(0).toUpperCase() +
+//         (job_status || "Open").slice(1).toLowerCase(),
+//       created_at: timestamp,
+//       updated_at: timestamp,
+//       edit: null,
+//       status_verified: "notverified",
+//       edit_verified: null,
+//       to_show_user: false,
+//       is_premium: false,
+//       job_type : "PRIVATE",
+//       posted_by : "RECRUITER"
+//     };
+
+//     const task_id = uuidv4();
+//     const newTask = {
+//       task_id,
+//       category: "postnewjob",
+//       job_id,
+//       recruiter_id: employer_id,
+//       status: "pending",
+//       created_at: timestamp,
+//       updated_at: timestamp
+//     };
+
+//     await Promise.all([
+//       ddbDocClient.send(
+//         new PutCommand({
+//           TableName: JOB_TABLE,
+//           Item: newJob
+//         })
+//       ),
+//       ddbDocClient.send(
+//         new PutCommand({
+//           TableName: TASK_TABLE,
+//           Item: newTask
+//         })
+//       )
+//     ]);
+
+//     // ✅ Send email notification to all students
+//     const subject = `📢 New Job Posted: ${job_title}`;
+//     const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "a company"} at ${location}.`;
+//     const htmlMsg = `
+//       <h2>New Job Alert 🚀</h2>
+//       <p><b>Job Title:</b> ${job_title}</p>
+//       <p><b>Company:</b> ${company_name || "Not specified"}</p>
+//       <p><b>Location:</b> ${location}</p>
+//       <p><b>Employment Type:</b> ${employment_type}</p>
+//       <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
+//       <p>Log in now to apply!</p>
+//     `;
+
+//     notifyAllStudents(subject, textMsg, htmlMsg);
+
+//     return res.status(201).json({
+//       message: "Job posted successfully",
+//       job_id,
+//       job: newJob,
+//       task: newTask
+//     });
+
+//   } catch (err) {
+//     console.error("Job Post Error:", err);
+//     return res.status(500).json({ error: "Failed to post job" });
+//   }
+// };
+
+
+
 export const postJob = async (req, res) => {
   try {
     const {
@@ -106,7 +247,6 @@ export const postJob = async (req, res) => {
       return res.status(400).json({ error: "Required fields missing" });
     }
 
-
     const employerResult = await ddbDocClient.send(
       new ScanCommand({
         TableName: EMPLOYER_TABLE,
@@ -123,27 +263,39 @@ export const postJob = async (req, res) => {
 
     const employer = employerResult.Items[0];
 
-    // ❌ If admin has NOT approved recruiter → stop posting
     if (!employer.hasadminapproved) {
       return res.status(403).json({
         error: "Your recruiter account is not approved by admin. You cannot post jobs."
       });
     }
 
-
-
-    
     const job_id = uuidv4();
     const timestamp = new Date().toISOString();
 
+    /**
+     * 🔹 Extract dynamic fields
+     * Remove fields that are already controlled by backend
+     */
+    const {
+      job_id: _ignoreJobId,
+      employer_id: _ignoreEmployerId,
+      created_at: _ignoreCreatedAt,
+      updated_at: _ignoreUpdatedAt,
+      status: _ignoreStatus,
+      posted_by: _ignorePostedBy,
+      job_type: _ignoreJobType,
+      ...extraJobFields
+    } = req.body;
+
     const newJob = {
+      // 🔒 Backend-controlled fields
       job_id,
       employer_id,
       job_title,
-      company_name: company_name || null,
       description,
       location,
       employment_type,
+      company_name: company_name || null,
       work_mode: work_mode || null,
       salary_range: salary_range || null,
       experience_required: experience_required || null,
@@ -162,8 +314,11 @@ export const postJob = async (req, res) => {
       edit_verified: null,
       to_show_user: false,
       is_premium: false,
-      job_type : "PRIVATE",
-      posted_by : "RECRUITER"
+      job_type: "PRIVATE",
+      posted_by: "RECRUITER",
+
+      // 🧠 Dynamically store ANY extra fields from req.body
+      ...extraJobFields
     };
 
     const task_id = uuidv4();
@@ -192,7 +347,6 @@ export const postJob = async (req, res) => {
       )
     ]);
 
-    // ✅ Send email notification to all students
     const subject = `📢 New Job Posted: ${job_title}`;
     const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "a company"} at ${location}.`;
     const htmlMsg = `
@@ -219,6 +373,7 @@ export const postJob = async (req, res) => {
     return res.status(500).json({ error: "Failed to post job" });
   }
 };
+
 
 
 // import { PutObjectCommand } from "@aws-sdk/client-s3";
