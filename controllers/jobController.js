@@ -238,7 +238,9 @@ export const postJob = async (req, res) => {
       qualifications,
       application_deadline,
       contact_email,
-      job_status
+      job_status,
+      additional_benefits,
+      contact_number,
     } = req.body;
 
     const employer_id = req.user?.employer_id || req.body.employer_id;
@@ -299,6 +301,8 @@ export const postJob = async (req, res) => {
       work_mode: work_mode || null,
       salary_range: salary_range || null,
       experience_required: experience_required || null,
+      additional_benefits:additional_benefits||null,
+      contact_number:contact_number||null,
       skills_required: skills_required || [],
       responsibilities: responsibilities || [],
       qualifications: qualifications || [],
