@@ -9,7 +9,8 @@ import { v4 as uuidv4 } from "uuid";
 import {
   PutCommand,
   ScanCommand,
-  UpdateCommand
+  UpdateCommand,
+  GetCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { sendEmail } from "../utils/mailer.js";  // ✅ import mailer
 
@@ -75,151 +76,6 @@ const notifyAllStudents = async (subject, message, htmlContent) => {
   }
 };
 
-// -----------------------------------------
-// ✅ Post a Normal Job
-// -----------------------------------------
-
-
-
-// export const postJob = async (req, res) => {
-//   try {
-//     const {
-//       job_title,
-//       description,
-//       location,
-//       salary_range,
-//       employment_type,
-//       skills_required,
-//       experience_required,
-//       company_name,
-//       work_mode,
-//       responsibilities,
-//       qualifications,
-//       application_deadline,
-//       contact_email,
-//       job_status
-//     } = req.body;
-
-//     const employer_id = req.user?.employer_id || req.body.employer_id;
-
-//     if (!employer_id || !job_title || !description || !location || !employment_type) {
-//       return res.status(400).json({ error: "Required fields missing" });
-//     }
-
-
-//     const employerResult = await ddbDocClient.send(
-//       new ScanCommand({
-//         TableName: EMPLOYER_TABLE,
-//         FilterExpression: "employer_id = :eid",
-//         ExpressionAttributeValues: {
-//           ":eid": employer_id
-//         }
-//       })
-//     );
-
-//     if (!employerResult.Items || employerResult.Items.length === 0) {
-//       return res.status(404).json({ error: "Employer not found" });
-//     }
-
-//     const employer = employerResult.Items[0];
-
-//     // ❌ If admin has NOT approved recruiter → stop posting
-//     if (!employer.hasadminapproved) {
-//       return res.status(403).json({
-//         error: "Your recruiter account is not approved by admin. You cannot post jobs."
-//       });
-//     }
-
-
-
-    
-//     const job_id = uuidv4();
-//     const timestamp = new Date().toISOString();
-
-//     const newJob = {
-//       job_id,
-//       employer_id,
-//       job_title,
-//       company_name: company_name || null,
-//       description,
-//       location,
-//       employment_type,
-//       work_mode: work_mode || null,
-//       salary_range: salary_range || null,
-//       experience_required: experience_required || null,
-//       skills_required: skills_required || [],
-//       responsibilities: responsibilities || [],
-//       qualifications: qualifications || [],
-//       application_deadline: application_deadline || null,
-//       contact_email: contact_email || null,
-//       status:
-//         (job_status || "Open").charAt(0).toUpperCase() +
-//         (job_status || "Open").slice(1).toLowerCase(),
-//       created_at: timestamp,
-//       updated_at: timestamp,
-//       edit: null,
-//       status_verified: "notverified",
-//       edit_verified: null,
-//       to_show_user: false,
-//       is_premium: false,
-//       job_type : "PRIVATE",
-//       posted_by : "RECRUITER"
-//     };
-
-//     const task_id = uuidv4();
-//     const newTask = {
-//       task_id,
-//       category: "postnewjob",
-//       job_id,
-//       recruiter_id: employer_id,
-//       status: "pending",
-//       created_at: timestamp,
-//       updated_at: timestamp
-//     };
-
-//     await Promise.all([
-//       ddbDocClient.send(
-//         new PutCommand({
-//           TableName: JOB_TABLE,
-//           Item: newJob
-//         })
-//       ),
-//       ddbDocClient.send(
-//         new PutCommand({
-//           TableName: TASK_TABLE,
-//           Item: newTask
-//         })
-//       )
-//     ]);
-
-//     // ✅ Send email notification to all students
-//     const subject = `📢 New Job Posted: ${job_title}`;
-//     const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "a company"} at ${location}.`;
-//     const htmlMsg = `
-//       <h2>New Job Alert 🚀</h2>
-//       <p><b>Job Title:</b> ${job_title}</p>
-//       <p><b>Company:</b> ${company_name || "Not specified"}</p>
-//       <p><b>Location:</b> ${location}</p>
-//       <p><b>Employment Type:</b> ${employment_type}</p>
-//       <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
-//       <p>Log in now to apply!</p>
-//     `;
-
-//     notifyAllStudents(subject, textMsg, htmlMsg);
-
-//     return res.status(201).json({
-//       message: "Job posted successfully",
-//       job_id,
-//       job: newJob,
-//       task: newTask
-//     });
-
-//   } catch (err) {
-//     console.error("Job Post Error:", err);
-//     return res.status(500).json({ error: "Failed to post job" });
-//   }
-// };
-
 
 
 export const postJob = async (req, res) => {
@@ -241,6 +97,9 @@ export const postJob = async (req, res) => {
       job_status,
       additional_benefits,
       contact_number,
+      total_vacancies,
+      posted_company_name
+      // contact_number
     } = req.body;
 
     const employer_id = req.user?.employer_id || req.body.employer_id;
@@ -303,11 +162,13 @@ export const postJob = async (req, res) => {
       experience_required: experience_required || null,
       additional_benefits:additional_benefits||null,
       contact_number:contact_number||null,
+      total_vacancies: total_vacancies || null,
       skills_required: skills_required || [],
       responsibilities: responsibilities || [],
       qualifications: qualifications || [],
       application_deadline: application_deadline || null,
       contact_email: contact_email || null,
+      posted_company_name: posted_company_name || null,
       status:
         (job_status || "Open").charAt(0).toUpperCase() +
         (job_status || "Open").slice(1).toLowerCase(),
@@ -380,150 +241,6 @@ export const postJob = async (req, res) => {
 
 
 
-// import { PutObjectCommand } from "@aws-sdk/client-s3";
-import path from "path";
-
-// export const postJob = async (req, res) => {
-//   try {
-//     const {
-//       job_title,
-//       description,
-//       location,
-//       salary_range,
-//       employment_type,
-//       skills_required,
-//       experience_required,
-//       company_name,
-//       work_mode,
-//       responsibilities,
-//       qualifications,
-//       application_deadline,
-//       contact_email,
-//       job_status
-//     } = req.body;
-
-//     const employer_id = req.user?.employer_id || req.body.employer_id;
-
-//     if (!employer_id || !job_title || !description || !location || !employment_type) {
-//       return res.status(400).json({ error: "Required fields missing" });
-//     }
-
-//     // ✅ Verify employer
-//     const employerResult = await ddbDocClient.send(
-//       new ScanCommand({
-//         TableName: EMPLOYER_TABLE,
-//         FilterExpression: "employer_id = :eid",
-//         ExpressionAttributeValues: { ":eid": employer_id }
-//       })
-//     );
-
-//     if (!employerResult.Items?.length) {
-//       return res.status(404).json({ error: "Employer not found" });
-//     }
-
-//     const employer = employerResult.Items[0];
-
-//     if (!employer.hasadminapproved) {
-//       return res.status(403).json({
-//         error: "Your recruiter account is not approved by admin."
-//       });
-//     }
-
-//     const job_id = uuidv4();
-//     const timestamp = new Date().toISOString();
-
-//     // ============================
-//     // 🟢 LOGO UPLOAD TO S3
-//     // ============================
-//     let job_logo_url = null;
-
-//     if (req.file) {
-//       const file = req.file;
-//       const ext = path.extname(file.originalname);
-
-//       const s3Key = `job-logo/${job_id}${ext}`;
-
-//       await s3Client.send(
-//         new PutObjectCommand({
-//           Bucket: process.env.KYC_BUCKET || "recruiter-kyc-docs",
-//           Key: s3Key,
-//           Body: file.buffer,
-//           ContentType: file.mimetype,
-//         })
-//       );
-
-//       job_logo_url = `https://${process.env.KYC_BUCKET || "recruiter-kyc-docs"}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
-//     }
-
-//     // ============================
-//     // 🟢 JOB OBJECT
-//     // ============================
-//     const newJob = {
-//       job_id,
-//       employer_id,
-//       job_title,
-//       company_name: company_name || null,
-//       description,
-//       location,
-//       employment_type,
-//       work_mode: work_mode || null,
-//       salary_range: salary_range || null,
-//       experience_required: experience_required || null,
-//       skills_required: skills_required || [],
-//       responsibilities: responsibilities || [],
-//       qualifications: qualifications || [],
-//       application_deadline: application_deadline || null,
-//       contact_email: contact_email || null,
-//       job_logo_url, // ⬅️ SAVED HERE
-//       status:
-//         (job_status || "Open").charAt(0).toUpperCase() +
-//         (job_status || "Open").slice(1).toLowerCase(),
-//       created_at: timestamp,
-//       updated_at: timestamp,
-//       edit: null,
-//       status_verified: "notverified",
-//       edit_verified: null,
-//       to_show_user: false,
-//       is_premium: false,
-//       job_type: "PRIVATE",
-//       posted_by: "RECRUITER"
-//     };
-
-//     const task_id = uuidv4();
-//     const newTask = {
-//       task_id,
-//       category: "postnewjob",
-//       job_id,
-//       recruiter_id: employer_id,
-//       status: "pending",
-//       created_at: timestamp,
-//       updated_at: timestamp
-//     };
-
-//     await Promise.all([
-//       ddbDocClient.send(new PutCommand({
-//         TableName: JOB_TABLE,
-//         Item: newJob
-//       })),
-//       ddbDocClient.send(new PutCommand({
-//         TableName: TASK_TABLE,
-//         Item: newTask
-//       }))
-//     ]);
-
-//     return res.status(201).json({
-//       message: "Job posted successfully",
-//       job_id,
-//       job: newJob
-//     });
-
-//   } catch (err) {
-//     console.error("Job Post Error:", err);
-//     return res.status(500).json({ error: "Failed to post job" });
-//   }
-// };
-
-
 
 
 export const uploadJobLogo = async (req, res) => {
@@ -591,7 +308,10 @@ export const postGovernmentJob = async (req, res) => {
       qualifications,
       application_deadline,
       contact_email,
-      job_status
+      contact_number,
+      job_status,
+      total_vacancies,
+      posted_company_name
     } = req.body;
 
     const admin_id = req.user?.admin_id || req.body.admin_id;
@@ -614,11 +334,14 @@ export const postGovernmentJob = async (req, res) => {
       work_mode: work_mode || null,
       salary_range: salary_range || null,
       experience_required: experience_required || null,
+      total_vacancies: total_vacancies || null,
       skills_required: skills_required || [],
       responsibilities: responsibilities || [],
       qualifications: qualifications || [],
+      contact_number: contact_number || null,
       application_deadline: application_deadline || null,
       contact_email: contact_email || null,
+      posted_company_name: posted_company_name || null,
       status:
         (job_status || "Open").charAt(0).toUpperCase() +
         (job_status || "Open").slice(1).toLowerCase(),
@@ -694,7 +417,10 @@ export const postJobByAdmin = async (req, res) => {
       qualifications,
       application_deadline,
       contact_email,
-      job_status
+      total_vacancies,
+      job_status,
+      contact_number,
+      posted_company_name
     } = req.body;
 
     const admin_id = req.user?.admin_id || req.body.admin_id;
@@ -722,6 +448,9 @@ export const postJobByAdmin = async (req, res) => {
       qualifications: qualifications || [],
       application_deadline: application_deadline || null,
       contact_email: contact_email || null,
+      total_vacancies: total_vacancies || null,
+      contact_number: contact_number || null,
+      posted_company_name: posted_company_name || null,
       status:
         (job_status || "Open").charAt(0).toUpperCase() +
         (job_status || "Open").slice(1).toLowerCase(),
@@ -782,7 +511,6 @@ export const postJobByAdmin = async (req, res) => {
 
 
 
-
 export const updateGovernmentJob = async (req, res) => {
   try {
     const { job_id } = req.params; // /gov-jobs/:job_id
@@ -802,7 +530,7 @@ export const updateGovernmentJob = async (req, res) => {
       "job_title", "description", "location", "salary_range", "employment_type",
       "skills_required", "experience_required", "department_name",
       "work_mode", "responsibilities", "qualifications",
-      "application_deadline", "contact_email", "status"
+      "application_deadline", "contact_email", "status", "contact_number"
     ];
 
     updatableFields.forEach((field) => {
@@ -874,7 +602,7 @@ export const updateJob = async (req, res) => {
     const updatableFields = [
       "job_title", "description", "location", "salary_range", "employment_type",
       "skills_required", "experience_required", "company_name",
-      "work_mode", "responsibilities", "qualifications",
+      "work_mode", "responsibilities", "qualifications","contact_number",
       "application_deadline", "contact_email", "status"
     ];
 
@@ -957,7 +685,7 @@ export const updateAdminJob = async (req, res) => {
     const updatableFields = [
       "job_title", "description", "location", "salary_range", "employment_type",
       "skills_required", "experience_required", "company_name",
-      "work_mode", "responsibilities", "qualifications",
+      "work_mode", "responsibilities", "qualifications", "contact_number",
       "application_deadline", "contact_email", "status"
     ];
 
@@ -1159,5 +887,187 @@ export const closeRecruiterJob = async (req, res) => {
   } catch (err) {
     console.error("Close Admin Job Error:", err);
     return res.status(500).json({ error: "Failed to close admin job" });
+  }
+};
+
+
+
+// import crypto from "crypto";
+// import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+// import {
+//   DynamoDBDocumentClient,
+//   // UpdateCommand,
+//   PutCommand,
+//   GetCommand,
+// } from "@aws-sdk/lib-dynamodb";
+
+// const ddbClient = new DynamoDBClient({});
+// const ddbDocClient = DynamoDBDocumentClient.from(ddbClient);
+
+
+// =========================================
+// RECRUITER API → REQUEST REOPEN JOB
+// =========================================
+export const reopenJobRequest = async (req, res) => {
+  try {
+    const { job_id } = req.body;
+
+    if (!job_id) {
+      return res.status(400).json({
+        success: false,
+        message: "job_id is required",
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // 1️⃣ Update job as open but hidden till admin approval
+    const jobUpdateResult = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression: `
+          SET #status = :status,
+              #status_verified = :notverified,
+              #to_show_user = :show,
+              updated_at = :updated_at
+        `,
+        ExpressionAttributeNames: {
+          "#status": "status",
+          "#status_verified": "status_verified",
+          "#to_show_user": "to_show_user",
+        },
+        ExpressionAttributeValues: {
+          ":status": "open",
+          ":notverified": "notverified",
+          ":show": false,
+          ":updated_at": now,
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    const updatedJob = jobUpdateResult.Attributes;
+    const recruiter_id = updatedJob?.employer_id || "unknown";
+
+    // 2️⃣ Create admin approval task
+    await ddbDocClient.send(
+      new PutCommand({
+        TableName: TASK_TABLE,
+        Item: {
+          task_id: crypto.randomUUID(),
+          category: "reopenjob",
+          job_id,
+          recruiter_id,
+          status: "pending",
+          created_at: now,
+          updated_at: now,
+        },
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Reopen request submitted successfully",
+      data: updatedJob,
+    });
+  } catch (error) {
+    console.error("Reopen Job Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit reopen request",
+    });
+  }
+};
+
+
+// =========================================
+// ADMIN API → APPROVE REOPEN JOB
+// =========================================
+export const approveReopenJob = async (req, res) => {
+  try {
+    const { task_id } = req.body;
+
+    if (!task_id) {
+      return res.status(400).json({
+        success: false,
+        message: "task_id is required",
+      });
+    }
+
+    const now = new Date().toISOString();
+
+    // 1️⃣ Get task
+    const taskResult = await ddbDocClient.send(
+      new GetCommand({
+        TableName: TASK_TABLE,
+        Key: { task_id },
+      })
+    );
+
+    if (!taskResult.Item) {
+      return res.status(404).json({
+        success: false,
+        message: "Task not found",
+      });
+    }
+
+    const { job_id } = taskResult.Item;
+
+    // 2️⃣ Mark task fulfilled
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: TASK_TABLE,
+        Key: { task_id },
+        UpdateExpression: `
+          SET #status = :status,
+              updated_at = :updated_at
+        `,
+        ExpressionAttributeNames: {
+          "#status": "status",
+        },
+        ExpressionAttributeValues: {
+          ":status": "fulfilled",
+          ":updated_at": now,
+        },
+      })
+    );
+
+    // 3️⃣ Approve job visibility
+    const jobUpdateResult = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression: `
+          SET #status_verified = :verified,
+              #to_show_user = :show,
+              updated_at = :updated_at
+        `,
+        ExpressionAttributeNames: {
+          "#status_verified": "status_verified",
+          "#to_show_user": "to_show_user",
+        },
+        ExpressionAttributeValues: {
+          ":verified": "verified",
+          ":show": true,
+          ":updated_at": now,
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Job reopen approved successfully",
+      data: jobUpdateResult.Attributes,
+    });
+  } catch (error) {
+    console.error("Approve Reopen Job Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Approval failed",
+    });
   }
 };
