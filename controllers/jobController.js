@@ -814,6 +814,44 @@ export const closeGovernmentJob = async (req, res) => {
 
 
 
+export const deleteAdminJob = async (req, res) => {
+  try {
+    const { job_id } = req.params;
+
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    const timestamp = new Date().toISOString();
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression:
+          "set #status = :deleted, to_show_user = :hide, is_delete = :delete, updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#status": "status"
+        },
+        ExpressionAttributeValues: {
+          ":deleted": "Deleted",
+          ":hide": false,
+          ":delete": true,
+          ":updated_at": timestamp
+        }
+      })
+    );
+
+    return res.status(200).json({
+      message: "Admin job deleted successfully",
+      job_id
+    });
+  } catch (err) {
+    console.error("Delete Admin Job Error:", err);
+    return res.status(500).json({ error: "Failed to delete admin job" });
+  }
+};
+
 export const closeAdminJob = async (req, res) => {
   try {
     const { job_id } = req.body;
