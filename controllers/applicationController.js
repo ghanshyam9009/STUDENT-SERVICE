@@ -3,7 +3,8 @@
 
 import {
   PutCommand,
-  ScanCommand
+  ScanCommand,
+  GetCommand
 } from "@aws-sdk/lib-dynamodb";
 import ddbDocClient from "../config/db.js";
 import dotenv from "dotenv";
@@ -575,5 +576,308 @@ export const getApplicationsByJobId = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+const PAGE_SIZE = 10;
+
+const scanAllTableItems = async (tableName) => {
+  const items = [];
+  let lastKey;
+
+  do {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        ExclusiveStartKey: lastKey,
+      })
+    );
+    items.push(...(result.Items || []));
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+
+  return items;
+};
+
+const getByKey = async (tableName, keyName, keyValue) => {
+  if (!keyValue) return null;
+
+  const result = await ddbDocClient.send(
+    new GetCommand({
+      TableName: tableName,
+      Key: { [keyName]: keyValue },
+    })
+  );
+
+  return result.Item || null;
+};
+
+const sanitizeUser = (user) => {
+  if (!user) return null;
+  const { password, ...safe } = user;
+  return safe;
+};
+
+const buildStudentLookup = (students) => {
+  const map = new Map();
+
+  for (const student of students) {
+    if (student.user_id) map.set(String(student.user_id), student);
+    if (student.student_id) map.set(String(student.student_id), student);
+  }
+
+  return map;
+};
+
+const buildTaskLookup = (tasks) => {
+  const map = new Map();
+
+  for (const task of tasks) {
+    if (!task.application_id) continue;
+    const key = task.application_id;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(task);
+  }
+
+  return map;
+};
+
+const normalizeLocations = (location) => {
+  if (!location) return [];
+  if (Array.isArray(location)) return location;
+  if (typeof location === "string") {
+    return location.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [String(location)];
+};
+
+const matchesSearch = (entry, search) => {
+  if (!search) return true;
+
+  const q = search.toLowerCase().trim();
+  const haystack = [
+    entry.candidate?.name,
+    entry.candidate?.email,
+    entry.job?.company_name,
+    entry.job?.job_title,
+    entry.user_details?.full_name,
+    entry.user_details?.email,
+    entry.job_details?.company_name,
+    entry.job_details?.job_title,
+  ]
+    .filter(Boolean)
+    .map((v) => String(v).toLowerCase());
+
+  return haystack.some((text) => text.includes(q));
+};
+
+const getPrimaryTask = (tasks = []) =>
+  tasks.find((t) => t.category === "newapplication") || tasks[0] || null;
+
+const mapTaskStatusToDisplay = (task) => {
+  if (!task?.status) return "Pending";
+
+  const s = String(task.status).toLowerCase();
+
+  if (s === "fulfilled" || s === "approved") return "Approved";
+  if (s === "rejected") return "Rejected";
+  return "Pending";
+};
+
+const matchesTaskStatusFilter = (entry, statusFilter) => {
+  const displayStatus = mapTaskStatusToDisplay(
+    entry.task_details || entry.task
+  );
+  return displayStatus.toLowerCase() === statusFilter.toLowerCase();
+};
+
+const formatAppliedCandidate = (applied, user, job, application, tasks = []) => {
+  const membershipType = user?.plan
+    ? String(user.plan).toUpperCase()
+    : user?.premium_user
+      ? "PREMIUM"
+      : "BASIC";
+
+  const primaryTask = getPrimaryTask(tasks);
+  const displayStatus = mapTaskStatusToDisplay(primaryTask);
+
+  return {
+    applied_id: applied.applied_id,
+    applied_date: applied.created_at || applied.duration,
+    user_id: applied.user_id,
+    job_id: applied.job_id,
+    application_id: applied.application_id,
+    candidate: {
+      student_id: applied.user_id,
+      name: user?.full_name || application?.student_name || null,
+      email: user?.email || application?.student_email || null,
+      phone_number: user?.phone_number || application?.student_phone || null,
+      profile_picture_url: user?.logo || null,
+      membership_type: membershipType,
+    },
+    job: {
+      job_id: job?.job_id || applied.job_id,
+      job_title: job?.job_title || null,
+      company_name: job?.company_name || job?.posted_company_name || null,
+      locations: normalizeLocations(job?.location),
+      job_category_tag: job?.job_type || job?.category || null,
+    },
+    application: {
+      application_id: application?.application_id || applied.application_id,
+      status: displayStatus,
+      skills_tags: application?.student_skills || user?.skills || [],
+      resume_url: application?.resume_url || null,
+      applied_at: application?.created_at || applied.created_at,
+    },
+    task: primaryTask
+      ? {
+          task_id: primaryTask.task_id,
+          category: primaryTask.category,
+          status: primaryTask.status,
+          job_id: primaryTask.job_id,
+          student_id: primaryTask.student_id,
+          recruiter_id: primaryTask.recruiter_id,
+          created_at: primaryTask.created_at,
+          updated_at: primaryTask.updated_at,
+        }
+      : null,
+    // tasks,
+    task_details: primaryTask,
+    user_details: sanitizeUser(user),
+    job_details: job,
+    application_details: application,
+  };
+};
+
+// GET /api/admin/applied-candidates
+export const getAllAppliedCandidates = async (req, res) => {
+  try {
+    const {
+      page = "1",
+      search = "",
+      status = "",
+      company = "",
+      job_id = "",
+      date_from = "",
+      date_to = "",
+      sort = "newest",
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+
+    const [appliedJobs, students, allTasks] = await Promise.all([
+      scanAllTableItems(APPLIED_TABLE),
+      scanAllTableItems(STUDENT_TABLE),
+      scanAllTableItems(TASK_TABLE),
+    ]);
+
+    const studentMap = buildStudentLookup(students);
+    const taskMap = buildTaskLookup(allTasks);
+
+    const uniqueJobIds = [...new Set(appliedJobs.map((a) => a.job_id).filter(Boolean))];
+    const uniqueAppIds = [
+      ...new Set(appliedJobs.map((a) => a.application_id).filter(Boolean)),
+    ];
+
+    const [jobResults, appResults] = await Promise.all([
+      Promise.all(uniqueJobIds.map((id) => getByKey(JOB_TABLE, "job_id", id))),
+      Promise.all(uniqueAppIds.map((id) => getByKey(APPLICATION_TABLE, "application_id", id))),
+    ]);
+
+    const jobMap = new Map(
+      jobResults.filter(Boolean).map((job) => [job.job_id, job])
+    );
+    const appMap = new Map(
+      appResults.filter(Boolean).map((app) => [app.application_id, app])
+    );
+
+    let entries = appliedJobs.map((applied) => {
+      const user = studentMap.get(String(applied.user_id)) || null;
+      const job = jobMap.get(applied.job_id) || null;
+      const application = appMap.get(applied.application_id) || null;
+      const tasks = taskMap.get(applied.application_id) || [];
+      return formatAppliedCandidate(applied, user, job, application, tasks);
+    });
+
+    if (search) {
+      entries = entries.filter((e) => matchesSearch(e, search));
+    }
+
+    if (status) {
+      entries = entries.filter((e) => matchesTaskStatusFilter(e, status));
+    }
+
+    if (company) {
+      const companyFilter = company.toLowerCase();
+      entries = entries.filter((e) =>
+        (e.job?.company_name || "").toLowerCase().includes(companyFilter)
+      );
+    }
+
+    if (job_id) {
+      entries = entries.filter((e) => e.job_id === job_id);
+    }
+
+    if (date_from) {
+      const from = new Date(date_from).getTime();
+      entries = entries.filter((e) => {
+        const appliedAt = new Date(e.applied_date || 0).getTime();
+        return !Number.isNaN(from) && appliedAt >= from;
+      });
+    }
+
+    if (date_to) {
+      const to = new Date(date_to).getTime();
+      entries = entries.filter((e) => {
+        const appliedAt = new Date(e.applied_date || 0).getTime();
+        return !Number.isNaN(to) && appliedAt <= to;
+      });
+    }
+
+    entries.sort((a, b) => {
+      const dateA = new Date(a.applied_date || 0).getTime();
+      const dateB = new Date(b.applied_date || 0).getTime();
+      return sort === "oldest" ? dateA - dateB : dateB - dateA;
+    });
+
+    const total = entries.length;
+    const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+    const start = (pageNum - 1) * PAGE_SIZE;
+    const paginated = entries.slice(start, start + PAGE_SIZE);
+
+    const companies = [
+      ...new Set(
+        entries.map((e) => e.job?.company_name).filter(Boolean)
+      ),
+    ].sort();
+
+    const jobs = [
+      ...new Map(
+        entries
+          .filter((e) => e.job_id && e.job?.job_title)
+          .map((e) => [e.job_id, { job_id: e.job_id, job_title: e.job.job_title }])
+      ).values(),
+    ];
+
+    return res.status(200).json({
+      success: true,
+      total,
+      page: pageNum,
+      limit: PAGE_SIZE,
+      total_pages: totalPages,
+      showing: paginated.length,
+      filters: {
+        companies,
+        jobs,
+        statuses: ["Approved", "Pending", "Rejected"],
+      },
+      data: paginated,
+    });
+  } catch (err) {
+    console.error("Get Applied Candidates Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch applied candidates",
+    });
   }
 };
