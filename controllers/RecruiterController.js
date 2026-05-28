@@ -275,6 +275,16 @@ const getLatestTaskByJobMap = (tasks) => {
   return map;
 };
 
+const getTasksByJobMap = (tasks) => {
+  const map = new Map();
+  for (const task of tasks) {
+    if (!task.job_id) continue;
+    if (!map.has(task.job_id)) map.set(task.job_id, []);
+    map.get(task.job_id).push(task);
+  }
+  return map;
+};
+
 const getApplicationCountByJobMap = (appliedJobs) => {
   const map = new Map();
   for (const applied of appliedJobs) {
@@ -302,15 +312,22 @@ const isApprovedJob = (job, latestTask) => {
   return statusVerified === "verified" && isVisible;
 };
 
-const matchesTab = (job, latestTask, tab) => {
+const matchesTab = (job, latestTask, allTasks, tab) => {
   if (tab === "all") return true;
   const taskCategory = String(latestTask?.category || "").toLowerCase();
   const jobStatus = String(job?.status || "").toLowerCase();
+  const categories = (allTasks || []).map((t) =>
+    String(t?.category || "").toLowerCase()
+  );
 
-  if (tab === "new") return taskCategory === "postnewjob";
-  if (tab === "edit") return taskCategory === "editjob";
-  if (tab === "close") return taskCategory === "closejob" || jobStatus === "closed";
-  if (tab === "reopen") return taskCategory === "reopenjob";
+  if (tab === "new") return categories.includes("postnewjob") || taskCategory === "postnewjob";
+  if (tab === "edit") return categories.includes("editjob") || taskCategory === "editjob";
+  if (tab === "close") {
+    return categories.includes("closejob") || taskCategory === "closejob" || jobStatus === "closed";
+  }
+  if (tab === "reopen") {
+    return categories.includes("reopenjob") || taskCategory === "reopenjob";
+  }
   return true;
 };
 
@@ -344,16 +361,19 @@ export const getAllRecruiterJob = async (req, res) => {
         .map((recruiter) => [String(recruiter.employer_id), recruiter])
     );
     const latestTaskMap = getLatestTaskByJobMap(tasks);
+    const tasksByJobMap = getTasksByJobMap(tasks);
     const applicationCountMap = getApplicationCountByJobMap(appliedJobs);
 
     let list = jobs.map((job) => {
       const recruiter = recruiterMap.get(String(job.employer_id)) || null;
       const latestTask = latestTaskMap.get(job.job_id) || null;
+      const allTasks = tasksByJobMap.get(job.job_id) || [];
       return {
         ...job,
         recruiter_name: recruiter?.full_name || null,
         recruiter_email: recruiter?.email || null,
         latest_task: latestTask,
+        tasks: allTasks,
         tab_category: latestTask?.category || null,
         applications_count: applicationCountMap.get(job.job_id) || 0,
       };
@@ -385,7 +405,9 @@ export const getAllRecruiterJob = async (req, res) => {
       list = list.filter((job) => isApprovedJob(job, job.latest_task));
     }
 
-    list = list.filter((job) => matchesTab(job, job.latest_task, normalizedTab));
+    list = list.filter((job) =>
+      matchesTab(job, job.latest_task, job.tasks, normalizedTab)
+    );
 
     if (company_name) {
       const q = company_name.toLowerCase().trim();
