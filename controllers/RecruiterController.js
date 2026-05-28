@@ -28,6 +28,10 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE; // DynamoDB table name
+const JOB_TABLE = process.env.JOB_TABLE;
+const TASK_TABLE = process.env.TASK_TABLE;
+const APPLIED_TABLE = process.env.APPLIED_TABLE;
+const PAGE_SIZE = 10;
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION });
 
@@ -230,6 +234,224 @@ export const updateEmployerProfile = async (req, res) => {
   } catch (err) {
     console.error("Employer Profile Update Error:", err);
     return res.status(500).json({ error: "Employer profile update failed" });
+  }
+};
+
+const scanAllItems = async (tableName) => {
+  const items = [];
+  let lastKey;
+
+  do {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        ExclusiveStartKey: lastKey,
+      })
+    );
+    items.push(...(result.Items || []));
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+
+  return items;
+};
+
+const getLatestTaskByJobMap = (tasks) => {
+  const map = new Map();
+
+  for (const task of tasks) {
+    if (!task.job_id) continue;
+
+    const existing = map.get(task.job_id);
+    const existingTime = new Date(
+      existing?.updated_at || existing?.created_at || 0
+    ).getTime();
+    const currentTime = new Date(task.updated_at || task.created_at || 0).getTime();
+
+    if (!existing || currentTime >= existingTime) {
+      map.set(task.job_id, task);
+    }
+  }
+
+  return map;
+};
+
+const getApplicationCountByJobMap = (appliedJobs) => {
+  const map = new Map();
+  for (const applied of appliedJobs) {
+    if (!applied.job_id) continue;
+    map.set(applied.job_id, (map.get(applied.job_id) || 0) + 1);
+  }
+  return map;
+};
+
+const normalizeTab = (tab = "all") => {
+  const value = String(tab).toLowerCase().trim();
+  if (["all", "new", "edit", "close", "reopen"].includes(value)) return value;
+  return "all";
+};
+
+const isTruthy = (value) => {
+  if (value === true) return true;
+  const normalized = String(value || "").toLowerCase().trim();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+};
+
+const isApprovedJob = (job, latestTask) => {
+  const statusVerified = String(job?.status_verified || "").toLowerCase();
+  const isVisible = isTruthy(job?.to_show_user);
+  return statusVerified === "verified" && isVisible;
+};
+
+const matchesTab = (job, latestTask, tab) => {
+  if (tab === "all") return true;
+  const taskCategory = String(latestTask?.category || "").toLowerCase();
+  const jobStatus = String(job?.status || "").toLowerCase();
+
+  if (tab === "new") return taskCategory === "postnewjob";
+  if (tab === "edit") return taskCategory === "editjob";
+  if (tab === "close") return taskCategory === "closejob" || jobStatus === "closed";
+  if (tab === "reopen") return taskCategory === "reopenjob";
+  return true;
+};
+
+// GET /api/Recruiter/jobs
+export const getAllRecruiterJob = async (req, res) => {
+  try {
+    const {
+      recruiter_id = "",
+      page = "1",
+      tab = "all",
+      company_name = "",
+      recruiter_name = "",
+      job_title = "",
+      search = "",
+      sort = "newest",
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const normalizedTab = normalizeTab(tab);
+
+    const [jobs, tasks, appliedJobs, recruiters] = await Promise.all([
+      scanAllItems(JOB_TABLE),
+      scanAllItems(TASK_TABLE),
+      scanAllItems(APPLIED_TABLE),
+      scanAllItems(EMPLOYER_TABLE),
+    ]);
+
+    const recruiterMap = new Map(
+      recruiters
+        .filter((r) => r.employer_id)
+        .map((recruiter) => [String(recruiter.employer_id), recruiter])
+    );
+    const latestTaskMap = getLatestTaskByJobMap(tasks);
+    const applicationCountMap = getApplicationCountByJobMap(appliedJobs);
+
+    let list = jobs.map((job) => {
+      const recruiter = recruiterMap.get(String(job.employer_id)) || null;
+      const latestTask = latestTaskMap.get(job.job_id) || null;
+      return {
+        ...job,
+        recruiter_name: recruiter?.full_name || null,
+        recruiter_email: recruiter?.email || null,
+        latest_task: latestTask,
+        tab_category: latestTask?.category || null,
+        applications_count: applicationCountMap.get(job.job_id) || 0,
+      };
+    });
+
+    // Only recruiter-side jobs should appear in this report.
+    // Keep this inclusive because legacy rows may miss posted_by/job_type values.
+    list = list.filter((job) => {
+      const postedBy = String(job.posted_by || "").toUpperCase();
+      const hasRecruiter = Boolean(job.employer_id);
+      const isDeleted = isTruthy(job.is_delete);
+      const hasRecruiterProfile = recruiterMap.has(String(job.employer_id));
+      const looksLikeRecruiterJob =
+        postedBy === "RECRUITER" || postedBy === "";
+      return (
+        looksLikeRecruiterJob &&
+        hasRecruiter &&
+        hasRecruiterProfile &&
+        !isDeleted
+      );
+    });
+
+    if (recruiter_id) {
+      list = list.filter((job) => String(job.employer_id) === String(recruiter_id));
+    }
+
+    // "All" tab should only show approved jobs.
+    if (normalizedTab === "all") {
+      list = list.filter((job) => isApprovedJob(job, job.latest_task));
+    }
+
+    list = list.filter((job) => matchesTab(job, job.latest_task, normalizedTab));
+
+    if (company_name) {
+      const q = company_name.toLowerCase().trim();
+      list = list.filter((job) =>
+        String(job.company_name || job.posted_company_name || "")
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    if (recruiter_name) {
+      const q = recruiter_name.toLowerCase().trim();
+      list = list.filter((job) =>
+        String(job.recruiter_name || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (job_title) {
+      const q = job_title.toLowerCase().trim();
+      list = list.filter((job) =>
+        String(job.job_title || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (search) {
+      const q = search.toLowerCase().trim();
+      list = list.filter((job) => {
+        const candidates = [
+          job.job_title,
+          job.company_name,
+          job.posted_company_name,
+          job.recruiter_name,
+        ]
+          .filter(Boolean)
+          .map((v) => String(v).toLowerCase());
+        return candidates.some((v) => v.includes(q));
+      });
+    }
+
+    list.sort((a, b) => {
+      const aTime = new Date(a.created_at || 0).getTime();
+      const bTime = new Date(b.created_at || 0).getTime();
+      return sort === "oldest" ? aTime - bTime : bTime - aTime;
+    });
+
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const start = (pageNum - 1) * PAGE_SIZE;
+    const data = list.slice(start, start + PAGE_SIZE);
+
+    return res.status(200).json({
+      success: true,
+      tab: normalizedTab,
+      page: pageNum,
+      limit: PAGE_SIZE,
+      total,
+      total_pages: totalPages,
+      showing: data.length,
+      data,
+    });
+  } catch (err) {
+    console.error("Get Recruiter Jobs Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch recruiter jobs",
+    });
   }
 };
 
