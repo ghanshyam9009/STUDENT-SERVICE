@@ -181,7 +181,7 @@ export const updatePlan = async (req, res) => {
 
     if (updates.price !== undefined) updates.price = Number(updates.price);
     if (updates.validity_days !== undefined) {
-      updates.validity_days = Number(updates.validity_days);
+      updates.validity_days = updates.validity_days;
     }
     if (updates.popular !== undefined) updates.popular = Boolean(updates.popular);
 
