@@ -39,7 +39,59 @@ const JOB_TABLE = process.env.JOB_TABLE;
 const GOV_JOB_TABLE = process.env.GOV_JOB_TABLE;
 const TASK_TABLE = process.env.TASK_TABLE;
 const USERS_TABLE = process.env.USERS_TABLE; // ✅ students table
-const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE
+const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE;
+const APPLICATION_TABLE = process.env.APPLICATION_TABLE;
+const ADMIN_JOBS_PAGE_SIZE = 5;
+
+const scanAllItems = async (tableName) => {
+  const items = [];
+  let lastKey;
+
+  do {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        ExclusiveStartKey: lastKey,
+      })
+    );
+    items.push(...(result.Items || []));
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+
+  return items;
+};
+
+const isTruthy = (value) => {
+  if (value === true) return true;
+  const normalized = String(value || "").toLowerCase().trim();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+};
+
+const isAdminPostedJob = (job) => {
+  const postedBy = String(job?.posted_by || "").toUpperCase();
+  return postedBy === "ADMIN";
+};
+
+const isDeletedJob = (job) => isTruthy(job?.is_delete);
+
+const getAdminJobStatus = (job) => {
+  const verified = String(job?.status_verified || "").toLowerCase() === "verified";
+  const visible = isTruthy(job?.to_show_user);
+  if (verified && visible) return "Approved";
+  return "Pending";
+};
+
+const isApprovedAdminJob = (job) => getAdminJobStatus(job) === "Approved";
+
+const getApplicationsByJobMap = (applications) => {
+  const map = new Map();
+  for (const app of applications) {
+    if (!app.job_id) continue;
+    if (!map.has(app.job_id)) map.set(app.job_id, []);
+    map.get(app.job_id).push(app);
+  }
+  return map;
+};
 
 // -----------------------------------------
 // ✅ Helper: Send job notification to all students
@@ -1106,6 +1158,140 @@ export const approveReopenJob = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Approval failed",
+    });
+  }
+};
+
+// GET /api/job/admin-jobs
+export const getAllAdminJobs = async (req, res) => {
+  try {
+    const {
+      page = "1",
+      search = "",
+      job_title = "",
+      company_name = "",
+      location = "",
+      date_from = "",
+      date_to = "",
+      sort = "newest",
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+
+    const [jobs, applications] = await Promise.all([
+      scanAllItems(JOB_TABLE),
+      scanAllItems(APPLICATION_TABLE),
+    ]);
+
+    const applicationsByJob = getApplicationsByJobMap(applications);
+
+    const allAdminJobs = jobs
+      .filter((job) => isAdminPostedJob(job) && !isDeletedJob(job))
+      .map((job) => {
+        const jobApplications = applicationsByJob.get(job.job_id) || [];
+        return {
+          ...job,
+          status_label: getAdminJobStatus(job),
+          applications: jobApplications,
+          applications_count: jobApplications.length,
+        };
+      });
+
+    // Pending jobs are excluded from this API response.
+    let list = allAdminJobs.filter((job) => isApprovedAdminJob(job));
+
+    if (job_title) {
+      const q = job_title.toLowerCase().trim();
+      list = list.filter((j) =>
+        String(j.job_title || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (company_name) {
+      const q = company_name.toLowerCase().trim();
+      list = list.filter((j) =>
+        String(j.company_name || j.posted_company_name || "")
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    if (location) {
+      const q = location.toLowerCase().trim();
+      list = list.filter((j) =>
+        String(j.location || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (search) {
+      const q = search.toLowerCase().trim();
+      list = list.filter((j) => {
+        const fields = [
+          j.job_title,
+          j.company_name,
+          j.posted_company_name,
+          j.location,
+          j.description,
+        ]
+          .filter(Boolean)
+          .map((v) => String(v).toLowerCase());
+        return fields.some((v) => v.includes(q));
+      });
+    }
+
+    if (date_from) {
+      const from = new Date(date_from).getTime();
+      list = list.filter((j) => {
+        const createdAt = new Date(j.created_at || 0).getTime();
+        return !Number.isNaN(from) && createdAt >= from;
+      });
+    }
+
+    if (date_to) {
+      const to = new Date(date_to).getTime();
+      list = list.filter((j) => {
+        const createdAt = new Date(j.created_at || 0).getTime();
+        return !Number.isNaN(to) && createdAt <= to;
+      });
+    }
+
+    const counts = {
+      total: list.length,
+      approved: list.length,
+      pending: allAdminJobs.filter((j) => j.status_label === "Pending").length,
+      total_applications: list.reduce(
+        (sum, j) => sum + (j.applications_count || 0),
+        0
+      ),
+    };
+
+    list.sort((a, b) => {
+      const aTime = new Date(a.created_at || 0).getTime();
+      const bTime = new Date(b.created_at || 0).getTime();
+      return sort === "oldest" ? aTime - bTime : bTime - aTime;
+    });
+
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / ADMIN_JOBS_PAGE_SIZE));
+    const start = (pageNum - 1) * ADMIN_JOBS_PAGE_SIZE;
+    const data = list.slice(start, start + ADMIN_JOBS_PAGE_SIZE);
+
+    return res.status(200).json({
+      success: true,
+      page: pageNum,
+      limit: ADMIN_JOBS_PAGE_SIZE,
+      total,
+      total_pages: totalPages,
+      showing: data.length,
+      counts,
+      jobs: data,
+      data,
+    });
+  } catch (err) {
+    console.error("Get Admin Jobs Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch admin jobs",
     });
   }
 };
