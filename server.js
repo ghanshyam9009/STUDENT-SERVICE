@@ -15,6 +15,7 @@ import passwordRoutes from "./routes/passwordRoutes.js";
 import paymentroutes from "./routes/paymentroutes.js";
 import premiumroutes from "./routes/premiumRoutes.js";
 import planRoutes from "./routes/planRoutes.js";
+import bannerRoutes from "./routes/bannerRoutes.js";
 
 dotenv.config();
 
@@ -159,6 +160,7 @@ app.use("/api/password", passwordRoutes);
 app.use("/api", paymentroutes);
 app.use("/api/premium", premiumroutes);
 app.use("/api/plans", planRoutes);
+app.use("/api/admin/banner", bannerRoutes);
 
 // -----------------------------------
 // Start Server

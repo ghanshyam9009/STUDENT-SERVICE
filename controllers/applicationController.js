@@ -756,6 +756,7 @@ export const getAllAppliedCandidates = async (req, res) => {
       page = "1",
       search = "",
       status = "",
+      role = "",
       company = "",
       job_id = "",
       date_from = "",
@@ -805,6 +806,21 @@ export const getAllAppliedCandidates = async (req, res) => {
 
     if (status) {
       entries = entries.filter((e) => matchesTaskStatusFilter(e, status));
+    }
+
+    if (role) {
+      const roleFilter = role.toLowerCase().trim();
+      entries = entries.filter((e) => {
+        const postedBy = String(
+          e.job?.posted_by || e.job_details?.posted_by || ""
+        )
+          .toLowerCase()
+          .trim();
+
+        if (roleFilter === "admin") return postedBy === "admin";
+        if (roleFilter === "recruiter") return postedBy === "recruiter";
+        return true;
+      });
     }
 
     if (company) {
