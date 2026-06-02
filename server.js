@@ -1,10 +1,11 @@
+import "./config/env.js";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
 
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import ddb from "./config/db.js";
 
 import studentRoutes from "./routes/studentRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
@@ -35,11 +36,7 @@ app.use(
   })
 );
 
-// -----------------------------------
-// DynamoDB Setup
-// -----------------------------------
-const client = new DynamoDBClient({ region: process.env.AWS_REGION });
-export const ddb = DynamoDBDocumentClient.from(client);
+export { ddb };
 
 const CONTACT_TABLE = "contact_form";
 const QUERY_TABLE = "query_form";

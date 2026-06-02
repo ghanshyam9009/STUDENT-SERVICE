@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import "../config/env.js";
 import multer from "multer";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -16,8 +16,6 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import ddbDocClient from "../config/db.js";
 
-dotenv.config();
-
 const storage = multer.memoryStorage();
 export const bannerUpload = multer({ storage });
 
@@ -29,13 +27,22 @@ const s3Client = new S3Client({
   },
 });
 
-const BANNER_BUCKET = process.env.BARANDA_BUCKET || process.env.BANNER_BUCKET;
+const getBannerBucket = () =>
+  String(
+    process.env.BANNER_BUCKET || process.env.BARANDA_BUCKET || ""
+  ).trim();
+
 const BANNER_TABLE = process.env.BANNER_TABLE || "banner";
 
 const normalizePageName = (value) => String(value || "").trim().toLowerCase();
 const isTableNotFoundError = (error) =>
   error?.name === "ResourceNotFoundException" ||
   error?.__type === "com.amazonaws.dynamodb.v20120810#ResourceNotFoundException";
+
+const isNetworkError = (error) =>
+  error?.code === "ENOTFOUND" ||
+  error?.code === "ECONNREFUSED" ||
+  error?.code === "ETIMEDOUT";
 
 const scanAllBanners = async () => {
   const items = [];
@@ -55,15 +62,13 @@ const scanAllBanners = async () => {
   return items;
 };
 
-const uploadFileToS3 = async (page, file) => {
+const uploadFileToS3 = async (page, file, bucket) => {
   const ext = path.extname(file.originalname || "") || ".jpg";
-  const key = `banners/${page}/${Date.now()}_${Math.random()
-    .toString(36)
-    .slice(2)}${ext}`;
+  const key = `banners/${page}/${uuidv4()}${ext}`;
 
   await s3Client.send(
     new PutObjectCommand({
-      Bucket: BANNER_BUCKET,
+      Bucket: bucket,
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
@@ -72,8 +77,48 @@ const uploadFileToS3 = async (page, file) => {
 
   return {
     key,
-    image_url: `https://${BANNER_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
+    image_url: `https://${bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`,
   };
+};
+
+/** Resolve S3 object key from stored key or image_url */
+const resolveS3Key = (item, bucket) => {
+  if (item?.key) return item.key;
+  const url = item?.image_url;
+  if (!url || typeof url !== "string") return null;
+
+  try {
+    const parsed = new URL(url);
+    const pathKey = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+    if (pathKey) return pathKey;
+  } catch {
+    /* fall through */
+  }
+
+  if (bucket && url.includes(`${bucket}.s3.`)) {
+    const marker = ".amazonaws.com/";
+    const idx = url.indexOf(marker);
+    if (idx !== -1) return decodeURIComponent(url.slice(idx + marker.length));
+  }
+
+  return null;
+};
+
+const deleteBannerImageFromS3 = async (item, fallbackBucket) => {
+  const bucket = item?.bucket || fallbackBucket;
+  const key = resolveS3Key(item, bucket);
+  if (!bucket || !key) return;
+
+  try {
+    await s3Client.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      })
+    );
+  } catch (err) {
+    console.warn("Failed to delete old banner image from S3:", key, err.message);
+  }
 };
 
 export const uploadBanner = async (req, res) => {
@@ -92,21 +137,54 @@ export const uploadBanner = async (req, res) => {
       return res.status(400).json({ error: "Only image files are allowed" });
     }
 
-    if (!BANNER_BUCKET) {
-      return res.status(500).json({ error: "Banner bucket is not configured" });
+    const bucket = getBannerBucket();
+    if (!bucket) {
+      return res.status(500).json({
+        error:
+          "Banner bucket is not configured. Set BANNER_BUCKET in .env and restart the server.",
+      });
     }
 
-    const { key, image_url } = await uploadFileToS3(page, req.file);
+    const { key, image_url } = await uploadFileToS3(page, req.file, bucket);
     const now = new Date().toISOString();
-    const banner_id = uuidv4();
+
+    // Same page par purane banners: S3 image delete + record replace
+    const existingForPage = (await scanAllBanners()).filter(
+      (b) => normalizePageName(b.page) === page
+    );
+
+    let banner_id = uuidv4();
+    let created_at = now;
+
+    if (existingForPage.length > 0) {
+      const primary = existingForPage.sort(
+        (a, b) =>
+          new Date(b.updated_at || b.created_at || 0).getTime() -
+          new Date(a.updated_at || a.created_at || 0).getTime()
+      )[0];
+      banner_id = primary.banner_id;
+      created_at = primary.created_at || now;
+
+      for (const old of existingForPage) {
+        await deleteBannerImageFromS3(old, bucket);
+        if (old.banner_id !== banner_id) {
+          await ddbDocClient.send(
+            new DeleteCommand({
+              TableName: BANNER_TABLE,
+              Key: { banner_id: old.banner_id },
+            })
+          );
+        }
+      }
+    }
 
     const item = {
       banner_id,
       page,
       image_url,
-      bucket: BANNER_BUCKET,
+      bucket,
       key,
-      created_at: now,
+      created_at,
       updated_at: now,
     };
 
@@ -118,15 +196,12 @@ export const uploadBanner = async (req, res) => {
         })
       );
     } catch (dbError) {
-      // Rollback uploaded object if metadata write fails.
-      if (key) {
-        await s3Client.send(
-          new DeleteObjectCommand({
-            Bucket: BANNER_BUCKET,
-            Key: key,
-          })
-        );
-      }
+      await s3Client.send(
+        new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        })
+      );
 
       if (isTableNotFoundError(dbError)) {
         return res.status(500).json({
@@ -136,9 +211,12 @@ export const uploadBanner = async (req, res) => {
       throw dbError;
     }
 
-    return res.status(201).json({
+    return res.status(existingForPage.length > 0 ? 200 : 201).json({
       success: true,
-      message: "Banner uploaded successfully",
+      message:
+        existingForPage.length > 0
+          ? "Banner replaced successfully (old image removed)"
+          : "Banner uploaded successfully",
       banner: item,
     });
   } catch (error) {
@@ -179,6 +257,12 @@ export const getBanners = async (req, res) => {
         count: 0,
         banners: [],
         warning: `Banner table '${BANNER_TABLE}' not found. Create table and set BANNER_TABLE in .env`,
+      });
+    }
+    if (isNetworkError(error)) {
+      return res.status(503).json({
+        error:
+          "Cannot reach DynamoDB. Check internet/DNS or set DNS_SERVERS=8.8.8.8,8.8.4.4 in .env and restart.",
       });
     }
     console.error("Get Banners Error:", error);
@@ -252,26 +336,33 @@ export const updateBanner = async (req, res) => {
       exprValues[":page"] = page;
     }
 
+    let oldImageSnapshot = null;
+
     if (req.file) {
+      const bucket = getBannerBucket();
+      if (!bucket) {
+        return res.status(500).json({
+          error:
+            "Banner bucket is not configured. Set BANNER_BUCKET in .env and restart the server.",
+        });
+      }
+
       const targetPage = page || normalizePageName(existing.Item.page);
-      const uploaded = await uploadFileToS3(targetPage, req.file);
+      const uploaded = await uploadFileToS3(targetPage, req.file, bucket);
       image_url = uploaded.image_url;
       key = uploaded.key;
+      oldImageSnapshot = { ...existing.Item };
 
-      updateExpr.push("image_url = :image_url", "#key = :key", "bucket = :bucket");
+      updateExpr.push(
+        "image_url = :image_url",
+        "#key = :key",
+        "#bucket = :bucket"
+      );
       exprNames["#key"] = "key";
+      exprNames["#bucket"] = "bucket";
       exprValues[":image_url"] = image_url;
       exprValues[":key"] = key;
-      exprValues[":bucket"] = BANNER_BUCKET;
-
-      if (existing.Item.key) {
-        await s3Client.send(
-          new DeleteObjectCommand({
-            Bucket: existing.Item.bucket || BANNER_BUCKET,
-            Key: existing.Item.key,
-          })
-        );
-      }
+      exprValues[":bucket"] = bucket;
     }
 
     const result = await ddbDocClient.send(
@@ -286,9 +377,17 @@ export const updateBanner = async (req, res) => {
       })
     );
 
+    // DB update ke baad purani S3 image delete — nayi URL ab record mein hai
+    if (oldImageSnapshot) {
+      const bucket = getBannerBucket();
+      await deleteBannerImageFromS3(oldImageSnapshot, bucket);
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Banner updated successfully",
+      message: req.file
+        ? "Banner updated successfully (old image removed)"
+        : "Banner updated successfully",
       banner: result.Attributes,
     });
   } catch (error) {
@@ -318,14 +417,7 @@ export const deleteBanner = async (req, res) => {
       return res.status(404).json({ error: "Banner not found" });
     }
 
-    if (existing.Item.key) {
-      await s3Client.send(
-        new DeleteObjectCommand({
-          Bucket: existing.Item.bucket || BANNER_BUCKET,
-          Key: existing.Item.key,
-        })
-      );
-    }
+    await deleteBannerImageFromS3(existing.Item, getBannerBucket());
 
     await ddbDocClient.send(
       new DeleteCommand({
