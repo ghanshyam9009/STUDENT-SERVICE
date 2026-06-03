@@ -1,10 +1,11 @@
+import "./config/env.js";
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
 
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import ddb from "./config/db.js";
 
 import studentRoutes from "./routes/studentRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
@@ -15,6 +16,7 @@ import passwordRoutes from "./routes/passwordRoutes.js";
 import paymentroutes from "./routes/paymentroutes.js";
 import premiumroutes from "./routes/premiumRoutes.js";
 import planRoutes from "./routes/planRoutes.js";
+import bannerRoutes from "./routes/bannerRoutes.js";
 
 dotenv.config();
 
@@ -34,11 +36,7 @@ app.use(
   })
 );
 
-// -----------------------------------
-// DynamoDB Setup
-// -----------------------------------
-const client = new DynamoDBClient({ region: process.env.AWS_REGION });
-export const ddb = DynamoDBDocumentClient.from(client);
+export { ddb };
 
 const CONTACT_TABLE = "contact_form";
 const QUERY_TABLE = "query_form";
@@ -159,6 +157,7 @@ app.use("/api/password", passwordRoutes);
 app.use("/api", paymentroutes);
 app.use("/api/premium", premiumroutes);
 app.use("/api/plans", planRoutes);
+app.use("/api/admin/banner", bannerRoutes);
 
 // -----------------------------------
 // Start Server

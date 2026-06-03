@@ -4,7 +4,8 @@ import {
   loginEmployer,
   updateEmployerProfile,
   upload,
-  updateLogo
+  updateLogo,
+  getAllRecruiterJob
 } from "../controllers/RecruiterController.js";
 
 import multer from "multer";
@@ -21,6 +22,7 @@ const router = express.Router();
 
 router.post("/register", registerEmployer);
 router.post("/login", loginEmployer);
+router.get("/jobs", getAllRecruiterJob);
 router.put("/update/:email", updateEmployerProfile);
 
 router.put("/update/:email/kyc", upload.single("document"), updateEmployerProfile);
