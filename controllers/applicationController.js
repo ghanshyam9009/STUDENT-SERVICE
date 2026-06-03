@@ -467,7 +467,7 @@ export const applyForAdminJob = async (req, res) => {
       employer_id: job.employer_id || null,
       resume_url: resume_url || null,
       cover_letter: cover_letter || null,
-      status: "Pending",
+      status: "Approved",
       status_verified: "verified",   // ✔
       to_show_user: false,           // ✔
       to_show_recruiter: false,      // ✔
