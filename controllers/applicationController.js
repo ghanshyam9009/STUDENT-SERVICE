@@ -28,7 +28,41 @@ const USER_TABLE        = process.env.USERS_TABLE;
 const TASK_TABLE        = process.env.TASK_TABLE;
 const GOV_JOB_APPLICATION_TABLE = process.env.GOV_JOB_TABLE
 const JOB_GSI_NAME = "job_id-index"; 
-const STUDENT_TABLE = process.env.USERS_TABLE;    
+const STUDENT_TABLE = process.env.USERS_TABLE;
+
+const normalizeId = (id) => {
+  if (id == null || id === "") return null;
+  return String(id).trim();
+};
+
+// application.student_id maps to Student.user_id
+const fetchStudentByUserId = async (studentId) => {
+  const idStr = normalizeId(studentId);
+  if (!idStr) return null;
+
+  const tryFetch = async (value) => {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: STUDENT_TABLE,
+        FilterExpression: "user_id = :uid",
+        ExpressionAttributeValues: { ":uid": value },
+      })
+    );
+    return result.Items?.[0] || null;
+  };
+
+  let student = await tryFetch(idStr);
+  if (student) return student;
+
+  const idNum = Number(idStr);
+  if (!Number.isNaN(idNum)) {
+    student = await tryFetch(idNum);
+    if (student) return student;
+  }
+
+  return null;
+};
+
 // -----------------------------------------
 // ✅ Apply for a Job
 // -----------------------------------------
@@ -195,22 +229,25 @@ export const applyForJob = async (req, res) => {
       return res.status(400).json({ error: "You have already applied for this job" });
     }
 
-    // 🔹 Fetch Student Details from Student Table using email
-    const studentResult = await ddbDocClient.send(
-      new ScanCommand({
-        TableName: STUDENT_TABLE,
-        FilterExpression: "email = :email",
-        ExpressionAttributeValues: {
-          ":email": student_email
-        }
-      })
-    );
+    // application.student_id = Student.user_id
+    let studentData = await fetchStudentByUserId(student_id);
 
-    if (!studentResult.Items || studentResult.Items.length === 0) {
-      return res.status(404).json({ error: "Student not found" });
+    if (!studentData && student_email) {
+      const studentResult = await ddbDocClient.send(
+        new ScanCommand({
+          TableName: STUDENT_TABLE,
+          FilterExpression: "email = :email",
+          ExpressionAttributeValues: {
+            ":email": student_email,
+          },
+        })
+      );
+      studentData = studentResult.Items?.[0] || null;
     }
 
-    const studentData = studentResult.Items[0];
+    if (!studentData) {
+      return res.status(404).json({ error: "Student not found" });
+    }
 
     const timestamp = new Date().toISOString();
     const application_id = uuidv4();
@@ -240,7 +277,7 @@ export const applyForJob = async (req, res) => {
       // 🔥 EXTRA Student Info
       student_email: studentData.email,
       student_name: studentData.full_name || studentData.name,
-      student_phone: studentData.phone || null,
+      student_phone: studentData.phone_number || studentData.phone || null,
       student_department: studentData.department || null,
       student_university: studentData.university || null,
       student_cgpa: studentData.cgpa || null,
@@ -455,6 +492,8 @@ export const applyForAdminJob = async (req, res) => {
       return res.status(400).json({ error: "You already applied for this job" });
     }
 
+    const studentData = await fetchStudentByUserId(student_id);
+
     const timestamp = new Date().toISOString();
     const application_id = uuidv4();
     const applied_id     = uuidv4();
@@ -472,7 +511,15 @@ export const applyForAdminJob = async (req, res) => {
       to_show_user: false,           // ✔
       to_show_recruiter: true,      // ✔
       created_at: timestamp,
-      updated_at: timestamp
+      updated_at: timestamp,
+      student_email: studentData?.email ?? null,
+      student_name: studentData?.full_name || studentData?.name || null,
+      student_phone: studentData?.phone_number || studentData?.phone || null,
+      student_department: studentData?.department ?? null,
+      student_university: studentData?.university ?? null,
+      student_cgpa: studentData?.cgpa ?? null,
+      student_skills: studentData?.skills ?? null,
+      student_profile: studentData,
     };
 
     await ddbDocClient.send(
@@ -619,14 +666,39 @@ const sanitizeUser = (user) => {
 };
 
 const buildStudentLookup = (students) => {
-  const map = new Map();
+  const byUserId = new Map();
+  const byEmail = new Map();
 
   for (const student of students) {
-    if (student.user_id) map.set(String(student.user_id), student);
-    if (student.student_id) map.set(String(student.student_id), student);
+    const userId = normalizeId(student.user_id);
+    if (userId) byUserId.set(userId, student);
+
+    const email = String(student.email || "").toLowerCase().trim();
+    if (email) byEmail.set(email, student);
   }
 
-  return map;
+  return { byUserId, byEmail };
+};
+
+const findStudentForApplication = (application, lookup) => {
+  if (!application || !lookup) return null;
+
+  const studentId = normalizeId(application.student_id);
+  if (studentId && lookup.byUserId.has(studentId)) {
+    return lookup.byUserId.get(studentId);
+  }
+
+  const userId = normalizeId(application.user_id);
+  if (userId && lookup.byUserId.has(userId)) {
+    return lookup.byUserId.get(userId);
+  }
+
+  const email = String(application.student_email || "").toLowerCase().trim();
+  if (email && lookup.byEmail.has(email)) {
+    return lookup.byEmail.get(email);
+  }
+
+  return null;
 };
 
 const buildTaskLookup = (tasks) => {
@@ -772,7 +844,7 @@ export const getAllAppliedCandidates = async (req, res) => {
       scanAllTableItems(TASK_TABLE),
     ]);
 
-    const studentMap = buildStudentLookup(students);
+    const studentLookup = buildStudentLookup(students);
     const taskMap = buildTaskLookup(allTasks);
 
     const uniqueJobIds = [...new Set(appliedJobs.map((a) => a.job_id).filter(Boolean))];
@@ -793,9 +865,12 @@ export const getAllAppliedCandidates = async (req, res) => {
     );
 
     let entries = appliedJobs.map((applied) => {
-      const user = studentMap.get(String(applied.user_id)) || null;
       const job = jobMap.get(applied.job_id) || null;
       const application = appMap.get(applied.application_id) || null;
+      const user =
+        studentLookup.byUserId.get(normalizeId(applied.user_id)) ||
+        findStudentForApplication(application, studentLookup) ||
+        null;
       const tasks = taskMap.get(applied.application_id) || [];
       return formatAppliedCandidate(applied, user, job, application, tasks);
     });
