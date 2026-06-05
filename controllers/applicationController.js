@@ -470,7 +470,7 @@ export const applyForAdminJob = async (req, res) => {
       status: "Approved",
       status_verified: "verified",   // ✔
       to_show_user: false,           // ✔
-      to_show_recruiter: false,      // ✔
+      to_show_recruiter: true,      // ✔
       created_at: timestamp,
       updated_at: timestamp
     };
