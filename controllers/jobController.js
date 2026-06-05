@@ -93,6 +93,94 @@ const getApplicationsByJobMap = (applications) => {
   return map;
 };
 
+const sanitizeUser = (user) => {
+  if (!user) return null;
+  const { password, ...safe } = user;
+  return safe;
+};
+
+const normalizeId = (id) => {
+  if (id == null || id === "") return null;
+  return String(id).trim();
+};
+
+// application.student_id maps to Student.user_id
+const buildStudentLookup = (students) => {
+  const byUserId = new Map();
+  const byEmail = new Map();
+
+  for (const student of students) {
+    const userId = normalizeId(student.user_id);
+    if (userId) byUserId.set(userId, student);
+
+    const email = String(student.email || "").toLowerCase().trim();
+    if (email) byEmail.set(email, student);
+  }
+
+  return { byUserId, byEmail };
+};
+
+const findStudentForApplication = (application, lookup) => {
+  if (!application || !lookup) return null;
+
+  const studentId = normalizeId(application.student_id);
+  if (studentId && lookup.byUserId.has(studentId)) {
+    return lookup.byUserId.get(studentId);
+  }
+
+  const userId = normalizeId(application.user_id);
+  if (userId && lookup.byUserId.has(userId)) {
+    return lookup.byUserId.get(userId);
+  }
+
+  const email = String(application.student_email || "").toLowerCase().trim();
+  if (email && lookup.byEmail.has(email)) {
+    return lookup.byEmail.get(email);
+  }
+
+  return null;
+};
+
+const enrichApplication = (application, studentLookup) => {
+  if (!application) return application;
+
+  const student = findStudentForApplication(application, studentLookup);
+  const enriched = { ...application };
+
+  if (student) {
+    enriched.student_email = student.email ?? enriched.student_email ?? null;
+    enriched.student_name =
+      student.full_name || student.name || enriched.student_name || null;
+    enriched.student_phone =
+      student.phone_number || student.phone || enriched.student_phone || null;
+    enriched.student_department =
+      student.department ?? enriched.student_department ?? null;
+    enriched.student_university =
+      student.university ?? enriched.student_university ?? null;
+    enriched.student_cgpa = student.cgpa ?? enriched.student_cgpa ?? null;
+    enriched.student_skills = student.skills ?? enriched.student_skills ?? null;
+    enriched.student_profile = sanitizeUser(student);
+  } else if (enriched.student_profile) {
+    enriched.student_profile = sanitizeUser(enriched.student_profile);
+    enriched.student_email =
+      enriched.student_email || enriched.student_profile.email || null;
+    enriched.student_name =
+      enriched.student_name ||
+      enriched.student_profile.full_name ||
+      enriched.student_profile.name ||
+      null;
+    enriched.student_phone =
+      enriched.student_phone ||
+      enriched.student_profile.phone_number ||
+      enriched.student_profile.phone ||
+      null;
+    enriched.student_skills =
+      enriched.student_skills ?? enriched.student_profile.skills ?? null;
+  }
+
+  return enriched;
+};
+
 // -----------------------------------------
 // ✅ Helper: Send job notification to all students
 // -----------------------------------------
@@ -1178,17 +1266,21 @@ export const getAllAdminJobs = async (req, res) => {
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
 
-    const [jobs, applications] = await Promise.all([
+    const [jobs, applications, students] = await Promise.all([
       scanAllItems(JOB_TABLE),
       scanAllItems(APPLICATION_TABLE),
+      scanAllItems(USERS_TABLE),
     ]);
 
+    const studentLookup = buildStudentLookup(students);
     const applicationsByJob = getApplicationsByJobMap(applications);
 
     const allAdminJobs = jobs
       .filter((job) => isAdminPostedJob(job) && !isDeletedJob(job))
       .map((job) => {
-        const jobApplications = applicationsByJob.get(job.job_id) || [];
+        const jobApplications = (applicationsByJob.get(job.job_id) || []).map(
+          (app) => enrichApplication(app, studentLookup)
+        );
         return {
           ...job,
           status_label: getAdminJobStatus(job),
