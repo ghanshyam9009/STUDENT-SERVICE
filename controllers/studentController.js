@@ -14,6 +14,37 @@ dotenv.config();
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
+const PAGE_SIZE = 20;
+
+const scanAllItems = async (tableName) => {
+  const items = [];
+  let lastKey;
+
+  do {
+    const result = await ddbDocClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        ExclusiveStartKey: lastKey,
+      })
+    );
+    items.push(...(result.Items || []));
+    lastKey = result.LastEvaluatedKey;
+  } while (lastKey);
+
+  return items;
+};
+
+const sanitizeUser = (user) => {
+  if (!user) return null;
+  const { password, ...safe } = user;
+  return safe;
+};
+
+const isFreeUser = (user) => {
+  if (user.premium_user === true) return false;
+  const plan = String(user.plan || "").toLowerCase().trim();
+  return plan !== "premium";
+};
 
 
 
@@ -241,6 +272,43 @@ export const updateLogo = async (req, res) => {
 };
 
 
+export const setManualPlan = async (req, res) => {
+  try {
+    const { email, is_manual_plan } = req.body;
+
+    if (!email || typeof is_manual_plan !== "string" || !is_manual_plan.trim()) {
+      return res.status(400).json({
+        error: "email and is_manual_plan (string) are required",
+      });
+    }
+
+    const result = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: USERS_TABLE,
+        Key: { email },
+        UpdateExpression:
+          "SET is_manual_plan = :isManualPlan, #updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#updated_at": "updated_at",
+        },
+        ExpressionAttributeValues: {
+          ":isManualPlan": is_manual_plan.toLowerCase().trim(),
+          ":updated_at": new Date().toISOString(),
+        },
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.status(200).json({
+      message: "Manual plan updated successfully",
+      user: result.Attributes,
+    });
+  } catch (error) {
+    console.error("Error setting manual plan:", error);
+    return res.status(500).json({ error: "Failed to update manual plan" });
+  }
+};
+
 export const markStudentPremium = async (req, res) => {
   try {
     const { email, is_premium, plan } = req.body;
@@ -280,6 +348,75 @@ export const markStudentPremium = async (req, res) => {
 
 
 
+
+// GET /api/students/users — paginated user list with filters
+export const getUserList = async (req, res) => {
+  try {
+    const {
+      page = "1",
+      email = "",
+      full_name = "",
+      gender = "",
+      sort = "newest",
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+
+    const users = await scanAllItems(USERS_TABLE);
+
+    let list = users
+      .map((user) => sanitizeUser(user))
+      .filter(isFreeUser);
+
+    if (email) {
+      const q = email.toLowerCase().trim();
+      list = list.filter((u) =>
+        String(u.email || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (full_name) {
+      const q = full_name.toLowerCase().trim();
+      list = list.filter((u) =>
+        String(u.full_name || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (gender) {
+      const q = gender.toLowerCase().trim();
+      list = list.filter((u) =>
+        String(u.gender || "").toLowerCase().includes(q)
+      );
+    }
+
+    list.sort((a, b) => {
+      const aTime = new Date(a.created_at || 0).getTime();
+      const bTime = new Date(b.created_at || 0).getTime();
+      return sort === "oldest" ? aTime - bTime : bTime - aTime;
+    });
+
+    const total = list.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const start = (pageNum - 1) * PAGE_SIZE;
+    const data = list.slice(start, start + PAGE_SIZE);
+
+    return res.status(200).json({
+      success: true,
+      page: pageNum,
+      limit: PAGE_SIZE,
+      total,
+      total_pages: totalPages,
+      showing: data.length,
+      users: data,
+    });
+  } catch (error) {
+    console.error("Error fetching user list:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch user list",
+    });
+  }
+};
 
 export const getPremiumPrices = async (req, res) => {
   try {
