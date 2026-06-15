@@ -1,11 +1,14 @@
 import bcrypt from "bcryptjs";
-import { sendEmail } from "../utils/mailer.js";
+import { sendOtpEmail } from "../utils/mailer.js";
 import { otpStore } from "./otpStore.js";
 import ddbDocClient from "../config/db.js";
 import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 // Generate 6-digit OTP
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const getOtpExpiryMs = () =>
+  (parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10) * 60 * 1000;
 
 // Helper to get table name based on role
 const getTableByRole = (role) => {
@@ -30,17 +33,16 @@ export const sendOtp = async (req, res) => {
 
     if (!user.Item) return res.status(404).json({ error: "User not found" });
 
-    // Generate OTP and expiry (5 min)
+    // Generate OTP and expiry
     const otp = generateOtp();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
+    const expiresAt = Date.now() + getOtpExpiryMs();
     otpStore[`${role}-${email}`] = { otp, expiresAt }; // store key as role-email
 
-    // Send OTP via email
-    await sendEmail({
+    // Send OTP via AWS SES
+    await sendOtpEmail({
       to: email,
-      subject: "Password Reset OTP",
-      text: `Your OTP for password reset is: ${otp}. It is valid for 5 minutes.`,
-      html: `<p>Your OTP for password reset is: <b>${otp}</b>. It is valid for 5 minutes.</p>`
+      userName: user.Item.full_name || user.Item.name || "User",
+      otp,
     });
 
     return res.json({ message: "OTP sent successfully" });
@@ -134,14 +136,14 @@ export const sendRegistrationOtp = async (req, res) => {
 
     // Generate OTP
     const otp = generateOtp();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
+    const expiresAt = Date.now() + getOtpExpiryMs();
 
     otpStore[`reg-${role}-${email}`] = { otp, expiresAt };
 
-    await sendEmail({
+    await sendOtpEmail({
       to: email,
-      subject: "Registration OTP",
-      text: `Your OTP is ${otp}.`,
+      userName: email.split("@")[0] || "User",
+      otp,
     });
 
     return res.json({ message: "Registration OTP sent" });

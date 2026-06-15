@@ -19,7 +19,7 @@ router.get("/admin-jobs", getAllAdminJobs);
 router.post("/Govtjobs", postGovernmentJob);
 
 router.post("/Updatejobs/:job_id", updateJob);
-router.post("/admin/updaterecruiterjobs/:job_id", updateRecruiterJobByAdmin);
+router.post("/updaterecruiterjobs/:job_id", updateRecruiterJobByAdmin);
 router.post("/updateadminjobs/:job_id", updateAdminJob);
 router.post("/updateGovtjobs/:job_id", updateGovernmentJob);
 

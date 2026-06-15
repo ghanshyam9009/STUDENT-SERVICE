@@ -448,8 +448,8 @@ export const getAllRecruiterJob = async (req, res) => {
     }
 
     list.sort((a, b) => {
-      const aTime = new Date(a.created_at || 0).getTime();
-      const bTime = new Date(b.created_at || 0).getTime();
+      const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+      const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
       return sort === "oldest" ? aTime - bTime : bTime - aTime;
     });
 
