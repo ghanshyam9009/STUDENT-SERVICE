@@ -219,8 +219,15 @@ const notifyAllStudents = async (jobDetails) => {
       })
     );
 
-    await Promise.allSettled(emailPromises);
-    console.log(`Job notification emails sent to ${students.length} students`);
+    const results = await Promise.allSettled(emailPromises);
+    const failed = results.filter((r) => r.status === "rejected");
+    const sent = results.length - failed.length;
+    console.log(
+      `Job notification emails: ${sent}/${students.length} sent` +
+        (failed.length
+          ? ` (${failed.length} failed — SES sandbox only allows verified recipient addresses)`
+          : "")
+    );
   } catch (err) {
     console.error("Error sending job notifications:", err);
   }
