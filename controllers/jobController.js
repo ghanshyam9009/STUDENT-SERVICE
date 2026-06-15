@@ -11,6 +11,7 @@ import {
   ScanCommand,
   UpdateCommand,
   GetCommand,
+  DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { sendEmail } from "../utils/mailer.js";  // ✅ import mailer
 
@@ -804,6 +805,68 @@ export const updateJob = async (req, res) => {
   }
 };
 
+export const updateRecruiterJobByAdmin = async (req, res) => {
+  try {
+    const { job_id } = req.params;
+    const admin_id = req.user?.admin_id || req.body.admin_id;
+    const updates = req.body;
+
+    if (!job_id || !admin_id) {
+      return res.status(400).json({ error: "job_id and admin_id required" });
+    }
+
+    let updateExp = "SET updated_at = :updated_at";
+    const exprAttrValues = {
+      ":updated_at": new Date().toISOString()
+    };
+    const exprAttrNames = {};
+
+    const updatableFields = [
+      "job_title", "description", "location", "salary_range", "employment_type",
+      "skills_required", "experience_required", "company_name",
+      "work_mode", "responsibilities", "qualifications", "contact_number",
+      "application_deadline", "contact_email", "status"
+    ];
+
+    updatableFields.forEach((field) => {
+      if (updates[field] !== undefined) {
+        const key = `#${field}`;
+        const val = `:${field}`;
+        updateExp += `, ${key} = ${val}`;
+        exprAttrNames[key] = field;
+        exprAttrValues[val] = updates[field];
+      }
+    });
+
+    if (Object.keys(exprAttrValues).length === 1) {
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
+
+    const result = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression: updateExp,
+        ExpressionAttributeNames: exprAttrNames,
+        ExpressionAttributeValues: exprAttrValues,
+        ConditionExpression: "attribute_exists(employer_id)",
+        ReturnValues: "ALL_NEW"
+      })
+    );
+
+    return res.status(200).json({
+      message: "Recruiter job updated successfully by admin",
+      job: result.Attributes
+    });
+  } catch (err) {
+    console.error("Admin Recruiter Job Update Error:", err);
+    if (err.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "Recruiter job not found" });
+    }
+    return res.status(500).json({ error: "Failed to update recruiter job" });
+  }
+};
+
 
 
 export const updateAdminJob = async (req, res) => {
@@ -1193,26 +1256,7 @@ export const approveReopenJob = async (req, res) => {
 
     const { job_id } = taskResult.Item;
 
-    // 2️⃣ Mark task fulfilled
-    await ddbDocClient.send(
-      new UpdateCommand({
-        TableName: TASK_TABLE,
-        Key: { task_id },
-        UpdateExpression: `
-          SET #status = :status,
-              updated_at = :updated_at
-        `,
-        ExpressionAttributeNames: {
-          "#status": "status",
-        },
-        ExpressionAttributeValues: {
-          ":status": "fulfilled",
-          ":updated_at": now,
-        },
-      })
-    );
-
-    // 3️⃣ Approve job visibility
+    // 2️⃣ Approve job visibility
     const jobUpdateResult = await ddbDocClient.send(
       new UpdateCommand({
         TableName: JOB_TABLE,
@@ -1232,6 +1276,14 @@ export const approveReopenJob = async (req, res) => {
           ":updated_at": now,
         },
         ReturnValues: "ALL_NEW",
+      })
+    );
+
+    // 3️⃣ Delete task after approval
+    await ddbDocClient.send(
+      new DeleteCommand({
+        TableName: TASK_TABLE,
+        Key: { task_id },
       })
     );
 
