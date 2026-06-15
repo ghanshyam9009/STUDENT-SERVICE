@@ -11,8 +11,9 @@ import {
   ScanCommand,
   UpdateCommand,
   GetCommand,
+  DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { sendEmail } from "../utils/mailer.js";  // ✅ import mailer
+import { sendJobAlertEmail } from "../utils/mailer.js";
 
 
 import multer from "multer";
@@ -182,14 +183,19 @@ const enrichApplication = (application, studentLookup) => {
 };
 
 // -----------------------------------------
-// ✅ Helper: Send job notification to all students
+// Helper: Send job notification to all students via AWS SES
 // -----------------------------------------
-const notifyAllStudents = async (subject, message, htmlContent) => {
+const notifyAllStudents = async (jobDetails) => {
   try {
+    const websiteUrl = process.env.WEBSITE_URL || "https://bigsource.com";
+    const applyUrl = jobDetails.job_id
+      ? `${websiteUrl}/jobs/${jobDetails.job_id}`
+      : `${websiteUrl}/jobs`;
+
     const studentsData = await ddbDocClient.send(
       new ScanCommand({
         TableName: USERS_TABLE,
-        ProjectionExpression: "email", // fetch only emails
+        ProjectionExpression: "email, full_name",
       })
     );
 
@@ -199,18 +205,29 @@ const notifyAllStudents = async (subject, message, htmlContent) => {
       return;
     }
 
-    // Send emails in parallel (in batches for performance)
     const emailPromises = students.map((student) =>
-      sendEmail({
+      sendJobAlertEmail({
         to: student.email,
-        subject,
-        text: message,
-        html: htmlContent,
+        candidateName: student.full_name || student.name || "Candidate",
+        jobTitle: jobDetails.job_title,
+        company: jobDetails.company,
+        location: jobDetails.location,
+        experience: jobDetails.experience,
+        salary: jobDetails.salary,
+        description: jobDetails.description,
+        applyUrl,
       })
     );
 
-    await Promise.allSettled(emailPromises);
-    console.log(`✅ Job notification emails sent to ${students.length} students`);
+    const results = await Promise.allSettled(emailPromises);
+    const failed = results.filter((r) => r.status === "rejected");
+    const sent = results.length - failed.length;
+    console.log(
+      `Job notification emails: ${sent}/${students.length} sent` +
+        (failed.length
+          ? ` (${failed.length} failed — SES sandbox only allows verified recipient addresses)`
+          : "")
+    );
   } catch (err) {
     console.error("Error sending job notifications:", err);
   }
@@ -352,19 +369,15 @@ export const postJob = async (req, res) => {
       )
     ]);
 
-    const subject = `📢 New Job Posted: ${job_title}`;
-    const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "a company"} at ${location}.`;
-    const htmlMsg = `
-      <h2>New Job Alert 🚀</h2>
-      <p><b>Job Title:</b> ${job_title}</p>
-      <p><b>Company:</b> ${company_name || "Not specified"}</p>
-      <p><b>Location:</b> ${location}</p>
-      <p><b>Employment Type:</b> ${employment_type}</p>
-      <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
-      <p>Log in now to apply!</p>
-    `;
-
-    notifyAllStudents(subject, textMsg, htmlMsg);
+    notifyAllStudents({
+      job_id,
+      job_title,
+      company: company_name || posted_company_name || "Not specified",
+      location,
+      experience: experience_required || "Not specified",
+      salary: salary_range || "Not specified",
+      description,
+    });
 
     return res.status(201).json({
       message: "Job posted successfully",
@@ -513,20 +526,15 @@ export const postGovernmentJob = async (req, res) => {
       )
     ]);
 
-    // ✅ Notify all students
-    const subject = `🏛️ New Government Job Posted: ${job_title}`;
-    const textMsg = `A new government job in ${department_name} titled "${job_title}" is now open at ${location}.`;
-    const htmlMsg = `
-      <h2>New Government Job Alert 🏛️</h2>
-      <p><b>Job Title:</b> ${job_title}</p>
-      <p><b>Department:</b> ${department_name}</p>
-      <p><b>Location:</b> ${location}</p>
-      <p><b>Employment Type:</b> ${employment_type}</p>
-      <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
-      <p>Visit the portal to apply now.</p>
-    `;
-
-    notifyAllStudents(subject, textMsg, htmlMsg);
+    notifyAllStudents({
+      job_id,
+      job_title,
+      company: department_name || posted_company_name || "Government Department",
+      location,
+      experience: experience_required || "Not specified",
+      salary: salary_range || "Not specified",
+      description,
+    });
 
     return res.status(201).json({
       message: "Government job posted successfully (visible by default)",
@@ -614,20 +622,15 @@ export const postJobByAdmin = async (req, res) => {
       })
     );
 
-    // ✅ Notify all students
-    const subject = `📢 New Job Posted by Admin: ${job_title}`;
-    const textMsg = `A new job titled "${job_title}" has been posted by ${company_name || "the admin"} at ${location}.`;
-    const htmlMsg = `
-      <h2>New Job Alert 🚀</h2>
-      <p><b>Job Title:</b> ${job_title}</p>
-      <p><b>Company:</b> ${company_name || "Not specified"}</p>
-      <p><b>Location:</b> ${location}</p>
-      <p><b>Employment Type:</b> ${employment_type}</p>
-      <p><b>Deadline:</b> ${application_deadline || "Not specified"}</p>
-      <p>Log in now to apply!</p>
-    `;
-
-    notifyAllStudents(subject, textMsg, htmlMsg);
+    notifyAllStudents({
+      job_id,
+      job_title,
+      company: company_name || posted_company_name || "Not specified",
+      location,
+      experience: experience_required || "Not specified",
+      salary: salary_range || "Not specified",
+      description,
+    });
 
     return res.status(201).json({
       message: "Job posted successfully by admin (visible & verified)",
@@ -801,6 +804,89 @@ export const updateJob = async (req, res) => {
   } catch (err) {
     console.error("Job Update Error:", err);
     return res.status(500).json({ error: "Failed to update job" });
+  }
+};
+
+export const updateRecruiterJobByAdmin = async (req, res) => {
+  try {
+    const { job_id } = req.params;
+    const admin_id = req.user?.admin_id || req.body.admin_id;
+
+    if (!job_id || !admin_id) {
+      return res.status(400).json({ error: "job_id and admin_id required" });
+    }
+
+    const protectedFields = new Set([
+      "job_id",
+      "employer_id",
+      "created_at",
+      "updated_at",
+      "admin_id",
+      "posted_by",
+      "job_type",
+    ]);
+
+    let updates = { ...req.body };
+
+    // Flatten nested additional_information from payload
+    if (
+      updates.additional_information &&
+      typeof updates.additional_information === "object" &&
+      !Array.isArray(updates.additional_information)
+    ) {
+      updates = { ...updates, ...updates.additional_information };
+      delete updates.additional_information;
+    }
+
+    // Frontend may send job_status instead of status
+    if (updates.job_status !== undefined && updates.status === undefined) {
+      const jobStatus = String(updates.job_status);
+      updates.status =
+        jobStatus.charAt(0).toUpperCase() + jobStatus.slice(1).toLowerCase();
+    }
+
+    let updateExp = "SET updated_at = :updated_at";
+    const exprAttrValues = {
+      ":updated_at": new Date().toISOString(),
+    };
+    const exprAttrNames = {};
+
+    Object.entries(updates).forEach(([field, value]) => {
+      if (protectedFields.has(field) || value === undefined) return;
+
+      const key = `#${field}`;
+      const val = `:${field}`;
+      updateExp += `, ${key} = ${val}`;
+      exprAttrNames[key] = field;
+      exprAttrValues[val] = value;
+    });
+
+    if (Object.keys(exprAttrNames).length === 0) {
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
+
+    const result = await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression: updateExp,
+        ExpressionAttributeNames: exprAttrNames,
+        ExpressionAttributeValues: exprAttrValues,
+        ConditionExpression: "attribute_exists(employer_id)",
+        ReturnValues: "ALL_NEW",
+      })
+    );
+
+    return res.status(200).json({
+      message: "Recruiter job updated successfully by admin",
+      job: result.Attributes,
+    });
+  } catch (err) {
+    console.error("Admin Recruiter Job Update Error:", err);
+    if (err.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "Recruiter job not found" });
+    }
+    return res.status(500).json({ error: "Failed to update recruiter job" });
   }
 };
 
@@ -1133,7 +1219,7 @@ export const reopenJobRequest = async (req, res) => {
       new PutCommand({
         TableName: TASK_TABLE,
         Item: {
-          task_id: crypto.randomUUID(),
+          task_id: uuidv4(),
           category: "reopenjob",
           job_id,
           recruiter_id,
@@ -1191,28 +1277,17 @@ export const approveReopenJob = async (req, res) => {
       });
     }
 
-    const { job_id } = taskResult.Item;
+    const task = taskResult.Item;
+    const { job_id, task_id: resolvedTaskId } = task;
 
-    // 2️⃣ Mark task fulfilled
-    await ddbDocClient.send(
-      new UpdateCommand({
-        TableName: TASK_TABLE,
-        Key: { task_id },
-        UpdateExpression: `
-          SET #status = :status,
-              updated_at = :updated_at
-        `,
-        ExpressionAttributeNames: {
-          "#status": "status",
-        },
-        ExpressionAttributeValues: {
-          ":status": "fulfilled",
-          ":updated_at": now,
-        },
-      })
-    );
+    if (!job_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid task: job_id missing",
+      });
+    }
 
-    // 3️⃣ Approve job visibility
+    // 2️⃣ Approve job visibility
     const jobUpdateResult = await ddbDocClient.send(
       new UpdateCommand({
         TableName: JOB_TABLE,
@@ -1235,13 +1310,31 @@ export const approveReopenJob = async (req, res) => {
       })
     );
 
+    // 3️⃣ Delete task after approval
+    await ddbDocClient.send(
+      new DeleteCommand({
+        TableName: TASK_TABLE,
+        Key: { task_id: resolvedTaskId },
+        ConditionExpression: "attribute_exists(task_id)",
+      })
+    );
+
     return res.status(200).json({
       success: true,
       message: "Job reopen approved successfully",
+      task_deleted: true,
+      deleted_task_id: resolvedTaskId,
       data: jobUpdateResult.Attributes,
     });
   } catch (error) {
     console.error("Approve Reopen Job Error:", error);
+
+    if (error.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({
+        success: false,
+        message: "Task already processed or not found",
+      });
+    }
 
     return res.status(500).json({
       success: false,

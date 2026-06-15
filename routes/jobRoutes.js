@@ -1,5 +1,5 @@
 import express from "express";
-import { uploadJobLogo,upload ,closeRecruiterJob,postJob ,postGovernmentJob,updateGovernmentJob,updateJob,postJobByAdmin,updateAdminJob, closeGovernmentJob, closeAdminJob, deleteAdminJob,reopenJobRequest, approveReopenJob, getAllAdminJobs} from "../controllers/jobController.js";
+import { uploadJobLogo,upload ,closeRecruiterJob,postJob ,postGovernmentJob,updateGovernmentJob,updateJob,updateRecruiterJobByAdmin,postJobByAdmin,updateAdminJob, closeGovernmentJob, closeAdminJob, deleteAdminJob,reopenJobRequest, approveReopenJob, getAllAdminJobs} from "../controllers/jobController.js";
 // import { verifyEmployerAuth } from "../middleware/auth.js"; // optional JWT middleware
 // import { upload } from "../utils/multer.js"; // ✅ same multer used elsewhere
 
@@ -19,6 +19,7 @@ router.get("/admin-jobs", getAllAdminJobs);
 router.post("/Govtjobs", postGovernmentJob);
 
 router.post("/Updatejobs/:job_id", updateJob);
+router.post("/updaterecruiterjobs/:job_id", updateRecruiterJobByAdmin);
 router.post("/updateadminjobs/:job_id", updateAdminJob);
 router.post("/updateGovtjobs/:job_id", updateGovernmentJob);
 
