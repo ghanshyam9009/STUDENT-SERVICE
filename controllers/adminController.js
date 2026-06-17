@@ -68,6 +68,105 @@ const getJobsPostedCountMap = (jobs) => {
   }
   return map;
 };
+
+const STATIC_FREE_CANDIDATE_PLAN = {
+  plan_id: "free",
+  name: "Free",
+  type: "candidate",
+  price: 0,
+};
+
+const findMatchedCandidatePlan = (student, candidatePlans) => {
+  const planValue = String(student?.plan || "").toLowerCase().trim();
+  const planIdValue = String(student?.plan_id || "").toLowerCase().trim();
+
+  return candidatePlans.find(
+    (p) =>
+      String(p.plan_id || "").toLowerCase() === planValue ||
+      String(p.plan_id || "").toLowerCase() === planIdValue ||
+      String(p.name || "").toLowerCase() === planValue
+  );
+};
+
+const resolveCandidatePlan = (student, candidatePlans) => {
+  const matchedPlan = findMatchedCandidatePlan(student, candidatePlans);
+  const resolvedName = String(matchedPlan?.name || student?.plan || "")
+    .toLowerCase()
+    .trim();
+
+  const isPremium =
+    student?.premium_user === true || resolvedName === "premium";
+  const isBasic = !isPremium && resolvedName === "basic";
+
+  if (isPremium) {
+    const premiumPlan =
+      matchedPlan ||
+      candidatePlans.find(
+        (p) => String(p.name || "").toLowerCase() === "premium"
+      );
+
+    return {
+      membership_type: "PREMIUM",
+      plan_id: premiumPlan?.plan_id || student.plan_id || null,
+      plan_name: premiumPlan?.name || student.plan || "Premium",
+      is_free: false,
+    };
+  }
+
+  if (isBasic) {
+    const basicPlan =
+      matchedPlan ||
+      candidatePlans.find((p) => String(p.name || "").toLowerCase() === "basic");
+
+    return {
+      membership_type: "BASIC",
+      plan_id: basicPlan?.plan_id || student.plan_id || null,
+      plan_name: basicPlan?.name || student.plan || "Basic",
+      is_free: false,
+    };
+  }
+
+  return {
+    membership_type: "FREE",
+    plan_id: STATIC_FREE_CANDIDATE_PLAN.plan_id,
+    plan_name: STATIC_FREE_CANDIDATE_PLAN.name,
+    is_free: true,
+  };
+};
+
+const buildCandidatePlanFilters = (candidatePlans) => {
+  const dynamicPlans = candidatePlans.map((p) => ({
+    plan_id: p.plan_id,
+    name: p.name,
+    type: p.type,
+    price: p.price,
+  }));
+
+  return [STATIC_FREE_CANDIDATE_PLAN, ...dynamicPlans];
+};
+
+const matchesCandidatePlanFilter = (candidate, planId, candidatePlans) => {
+  const targetId = String(planId).toLowerCase().trim();
+
+  if (targetId === "free") {
+    return candidate.is_free === true;
+  }
+
+  const selectedPlan = candidatePlans.find(
+    (p) => String(p.plan_id || "").toLowerCase() === targetId
+  );
+  const candidatePlanId = String(candidate.plan_id || "").toLowerCase();
+  const candidatePlan = String(
+    candidate.plan || candidate.plan_name || ""
+  ).toLowerCase();
+  const targetName = String(selectedPlan?.name || "").toLowerCase();
+
+  return (
+    candidatePlanId === targetId ||
+    candidatePlan === targetId ||
+    (targetName && candidatePlan === targetName)
+  );
+};
 // ✅ Register Admin
 export const registerAdmin = async (req, res) => {
   try {
@@ -478,19 +577,10 @@ export const getAllcandidates = async (req, res) => {
 
     let list = students.map((student) => {
       const safe = sanitizeCandidate(student);
-      const planValue = String(student.plan || "").toLowerCase();
-      const matchedPlan = candidatePlans.find(
-        (p) =>
-          String(p.plan_id || "").toLowerCase() === planValue ||
-          String(p.name || "").toLowerCase() === planValue
-      );
+      const planInfo = resolveCandidatePlan(student, candidatePlans);
       return {
         ...safe,
-        membership_type: student.premium_user
-          ? String(student.plan || "PREMIUM").toUpperCase()
-          : String(student.plan || "BASIC").toUpperCase(),
-        plan_id: matchedPlan?.plan_id || student.plan_id || null,
-        plan_name: matchedPlan?.name || student.plan || null,
+        ...planInfo,
       };
     });
 
@@ -509,24 +599,21 @@ export const getAllcandidates = async (req, res) => {
     }
 
     if (plan_id) {
-      const selectedPlan = candidatePlans.find((p) => p.plan_id === plan_id);
-      list = list.filter((c) => {
-        const candidatePlanId = String(c.plan_id || "").toLowerCase();
-        const candidatePlan = String(c.plan || c.plan_name || "").toLowerCase();
-        const targetId = String(plan_id).toLowerCase();
-        const targetName = String(selectedPlan?.name || "").toLowerCase();
-        return (
-          candidatePlanId === targetId ||
-          candidatePlan === targetId ||
-          (targetName && candidatePlan === targetName)
-        );
-      });
+      list = list.filter((c) =>
+        matchesCandidatePlanFilter(c, plan_id, candidatePlans)
+      );
     }
 
     if (search) {
       const q = search.toLowerCase().trim();
       list = list.filter((c) => {
-        const fields = [c.full_name, c.email, c.phone_number, c.plan_name]
+        const fields = [
+          c.full_name,
+          c.email,
+          c.phone_number,
+          c.plan_name,
+          c.membership_type,
+        ]
           .filter(Boolean)
           .map((v) => String(v).toLowerCase());
         return fields.some((v) => v.includes(q));
@@ -557,23 +644,19 @@ export const getAllcandidates = async (req, res) => {
 
     const total = list.length;
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const start = (pageNum - 1) * PAGE_SIZE;
+    const safePageNum = Math.min(pageNum, totalPages);
+    const start = (safePageNum - 1) * PAGE_SIZE;
     const data = list.slice(start, start + PAGE_SIZE);
 
     return res.status(200).json({
       success: true,
-      page: pageNum,
+      page: safePageNum,
       limit: PAGE_SIZE,
       total,
       total_pages: totalPages,
       showing: data.length,
       filters: {
-        plans: candidatePlans.map((p) => ({
-          plan_id: p.plan_id,
-          name: p.name,
-          type: p.type,
-          price: p.price,
-        })),
+        plans: buildCandidatePlanFilters(candidatePlans),
       },
       candidates: data,
       data,

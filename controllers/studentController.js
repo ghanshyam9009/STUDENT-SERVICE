@@ -1,11 +1,14 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { PutCommand,DynamoDBDocumentClient, GetCommand, UpdateCommand, QueryCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import ddbDocClient from "../config/db.js";
 import dotenv from "dotenv";
 import multer from "multer";
 import path from "path";
+import { sendOtpEmail } from "../utils/mailer.js";
+import { otpStore } from "./otpStore.js";
 
 const storage = multer.memoryStorage();
 export const upload = multer({ storage });
@@ -14,7 +17,48 @@ dotenv.config();
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
+const ADMIN_TABLE = process.env.ADMIN_TABLE;
 const PAGE_SIZE = 20;
+
+const MANUAL_PLAN_OTP_PREFIX = "manual-plan";
+const MANUAL_PLAN_VERIFY_PREFIX = "manual-plan-verified";
+
+const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const getOtpExpiryMs = () =>
+  (parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10) * 60 * 1000;
+
+const getManualPlanVerifyExpiryMs = () => 15 * 60 * 1000;
+
+const getManualPlanOtpKey = (adminEmail) =>
+  `${MANUAL_PLAN_OTP_PREFIX}-${String(adminEmail).toLowerCase().trim()}`;
+
+const getManualPlanVerifyKey = (adminEmail) =>
+  `${MANUAL_PLAN_VERIFY_PREFIX}-${String(adminEmail).toLowerCase().trim()}`;
+
+const findAdminByEmail = async (email) => {
+  const result = await ddbDocClient.send(
+    new ScanCommand({
+      TableName: ADMIN_TABLE,
+      FilterExpression: "email = :email",
+      ExpressionAttributeValues: {
+        ":email": email,
+      },
+    })
+  );
+
+  return result.Items?.[0] || null;
+};
+
+const isManualPlanVerified = (adminEmail, verificationToken) => {
+  const record = otpStore[getManualPlanVerifyKey(adminEmail)];
+  if (!record) return false;
+  if (record.expiresAt < Date.now()) {
+    delete otpStore[getManualPlanVerifyKey(adminEmail)];
+    return false;
+  }
+  return record.token === verificationToken;
+};
 
 const scanAllItems = async (tableName) => {
   const items = [];
@@ -272,14 +316,118 @@ export const updateLogo = async (req, res) => {
 };
 
 
+export const sendManualPlanOtp = async (req, res) => {
+  try {
+    const { admin_email } = req.body;
+
+    if (!admin_email || !String(admin_email).trim()) {
+      return res.status(400).json({ error: "admin_email is required" });
+    }
+
+    const normalizedEmail = String(admin_email).toLowerCase().trim();
+    const admin = await findAdminByEmail(normalizedEmail);
+
+    if (!admin) {
+      return res.status(404).json({ error: "Admin not found" });
+    }
+
+    const otp = generateOtp();
+    const expiresAt = Date.now() + getOtpExpiryMs();
+    otpStore[getManualPlanOtpKey(normalizedEmail)] = { otp, expiresAt };
+
+    delete otpStore[getManualPlanVerifyKey(normalizedEmail)];
+
+    await sendOtpEmail({
+      to: normalizedEmail,
+      userName: admin.full_name || "Admin",
+      otp,
+    });
+
+    return res.status(200).json({
+      message: "OTP sent to admin email successfully",
+    });
+  } catch (error) {
+    console.error("Error sending manual plan OTP:", error);
+    return res.status(500).json({ error: "Failed to send OTP" });
+  }
+};
+
+export const verifyManualPlanOtp = async (req, res) => {
+  try {
+    const { admin_email, otp } = req.body;
+
+    if (!admin_email || !otp) {
+      return res.status(400).json({ error: "admin_email and otp are required" });
+    }
+
+    const normalizedEmail = String(admin_email).toLowerCase().trim();
+    const record = otpStore[getManualPlanOtpKey(normalizedEmail)];
+
+    if (!record) {
+      return res.status(400).json({ error: "OTP not found or expired" });
+    }
+
+    if (record.expiresAt < Date.now()) {
+      delete otpStore[getManualPlanOtpKey(normalizedEmail)];
+      return res.status(400).json({ error: "OTP expired" });
+    }
+
+    if (String(record.otp) !== String(otp).trim()) {
+      return res.status(400).json({ error: "Invalid OTP" });
+    }
+
+    const verification_token = crypto.randomBytes(32).toString("hex");
+    otpStore[getManualPlanVerifyKey(normalizedEmail)] = {
+      token: verification_token,
+      expiresAt: Date.now() + getManualPlanVerifyExpiryMs(),
+    };
+
+    delete otpStore[getManualPlanOtpKey(normalizedEmail)];
+
+    return res.status(200).json({
+      message: "OTP verified successfully",
+      verification_token,
+      expires_in_minutes: 15,
+    });
+  } catch (error) {
+    console.error("Error verifying manual plan OTP:", error);
+    return res.status(500).json({ error: "Failed to verify OTP" });
+  }
+};
+
 export const setManualPlan = async (req, res) => {
   try {
-    const { email, is_manual_plan } = req.body;
+    const { email, is_manual_plan, admin_email, verification_token } = req.body;
 
     if (!email || typeof is_manual_plan !== "string" || !is_manual_plan.trim()) {
       return res.status(400).json({
         error: "email and is_manual_plan (string) are required",
       });
+    }
+
+    if (!admin_email || !verification_token) {
+      return res.status(403).json({
+        error: "Admin OTP verification required before updating manual plan",
+      });
+    }
+
+    const normalizedAdminEmail = String(admin_email).toLowerCase().trim();
+
+    if (!isManualPlanVerified(normalizedAdminEmail, verification_token)) {
+      return res.status(403).json({
+        error: "Invalid or expired verification. Please verify admin OTP again.",
+      });
+    }
+
+    const studentResult = await ddbDocClient.send(
+      new GetCommand({
+        TableName: USERS_TABLE,
+        Key: { email },
+      })
+    );
+
+    if (!studentResult.Item) {
+      return res.status(404).json({ error: "Student not found" });
     }
 
     const result = await ddbDocClient.send(
@@ -298,6 +446,8 @@ export const setManualPlan = async (req, res) => {
         ReturnValues: "ALL_NEW",
       })
     );
+
+    delete otpStore[getManualPlanVerifyKey(normalizedAdminEmail)];
 
     return res.status(200).json({
       message: "Manual plan updated successfully",
