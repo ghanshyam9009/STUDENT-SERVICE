@@ -281,11 +281,11 @@ export const postJob = async (req, res) => {
 
     const employer = employerResult.Items[0];
 
-    if (!employer.hasadminapproved) {
-      return res.status(403).json({
-        error: "Your recruiter account is not approved by admin. You cannot post jobs."
-      });
-    }
+    // if (!employer.hasadminapproved) {
+    //   return res.status(403).json({
+    //     error: "Your recruiter account is not approved by admin. You cannot post jobs."
+    //   });
+    // }
 
     const job_id = uuidv4();
     const timestamp = new Date().toISOString();
@@ -896,55 +896,76 @@ export const updateAdminJob = async (req, res) => {
   try {
     const { job_id } = req.params; // /admin-jobs/:job_id
     const admin_id = req.user?.admin_id || req.body.admin_id;
-    const updates = req.body; // Fields to update
 
     if (!job_id || !admin_id) {
       return res.status(400).json({ error: "job_id and admin_id required" });
     }
 
-    // Build dynamic update expression
+    const protectedFields = new Set([
+      "job_id",
+      "employer_id",
+      "created_at",
+      "updated_at",
+      "admin_id",
+      "posted_by",
+      "job_type",
+      "category",
+    ]);
+
+    let updates = { ...req.body };
+
+    if (
+      updates.additional_information &&
+      typeof updates.additional_information === "object" &&
+      !Array.isArray(updates.additional_information)
+    ) {
+      updates = { ...updates, ...updates.additional_information };
+      delete updates.additional_information;
+    }
+
+    if (updates.job_status !== undefined && updates.status === undefined) {
+      const jobStatus = String(updates.job_status);
+      updates.status =
+        jobStatus.charAt(0).toUpperCase() + jobStatus.slice(1).toLowerCase();
+    }
+
     let updateExp = "SET updated_at = :updated_at";
-    const exprAttrValues = { ":updated_at": new Date().toISOString(), ":admin_id": admin_id };
+    const exprAttrValues = {
+      ":updated_at": new Date().toISOString(),
+      ":admin_id": admin_id,
+    };
     const exprAttrNames = {};
 
-    // Allowed updatable fields
-    const updatableFields = [
-      "job_title", "description", "location", "salary_range", "employment_type",
-      "skills_required", "experience_required", "company_name",
-      "work_mode", "responsibilities", "qualifications", "contact_number",
-      "application_deadline", "contact_email", "status"
-    ];
+    Object.entries(updates).forEach(([field, value]) => {
+      if (protectedFields.has(field) || value === undefined) return;
 
-    updatableFields.forEach((field) => {
-      if (updates[field] !== undefined) {
-        const key = `#${field}`;
-        const val = `:${field}`;
-        updateExp += `, ${key} = ${val}`;
-        exprAttrNames[key] = field;
-        exprAttrValues[val] = updates[field];
-      }
+      const key = `#${field}`;
+      const val = `:${field}`;
+      updateExp += `, ${key} = ${val}`;
+      exprAttrNames[key] = field;
+      exprAttrValues[val] = value;
     });
 
-    // If only updated_at is being set
-    if (Object.keys(exprAttrValues).length === 2) { // only updated_at and admin_id
+    if (Object.keys(exprAttrNames).length === 0) {
       return res.status(400).json({ error: "No updatable fields provided" });
     }
 
-    // Update the job in JOB_TABLE
-    await ddbDocClient.send(
+    const result = await ddbDocClient.send(
       new UpdateCommand({
         TableName: JOB_TABLE,
         Key: { job_id },
         UpdateExpression: updateExp,
         ExpressionAttributeNames: exprAttrNames,
         ExpressionAttributeValues: exprAttrValues,
-        ConditionExpression: "admin_id = :admin_id", // ✅ ensures only job's admin can update
-        ReturnValues: "ALL_NEW"
+        ConditionExpression: "admin_id = :admin_id",
+        ReturnValues: "ALL_NEW",
       })
     );
 
-    return res.status(200).json({ message: "Admin job updated successfully" });
-
+    return res.status(200).json({
+      message: "Admin job updated successfully",
+      job: result.Attributes,
+    });
   } catch (err) {
     console.error("Admin Job Update Error:", err);
     if (err.name === "ConditionalCheckFailedException") {
@@ -1075,6 +1096,48 @@ export const deleteAdminJob = async (req, res) => {
   } catch (err) {
     console.error("Delete Admin Job Error:", err);
     return res.status(500).json({ error: "Failed to delete admin job" });
+  }
+};
+
+export const deleteRecruiterJob = async (req, res) => {
+  try {
+    const { job_id } = req.params;
+
+    if (!job_id) {
+      return res.status(400).json({ error: "job_id is required" });
+    }
+
+    const timestamp = new Date().toISOString();
+
+    await ddbDocClient.send(
+      new UpdateCommand({
+        TableName: JOB_TABLE,
+        Key: { job_id },
+        UpdateExpression:
+          "set #status = :deleted, to_show_user = :hide, is_delete = :delete, updated_at = :updated_at",
+        ExpressionAttributeNames: {
+          "#status": "status",
+        },
+        ExpressionAttributeValues: {
+          ":deleted": "Deleted",
+          ":hide": false,
+          ":delete": true,
+          ":updated_at": timestamp,
+        },
+        ConditionExpression: "attribute_exists(employer_id)",
+      })
+    );
+
+    return res.status(200).json({
+      message: "Recruiter job deleted successfully",
+      job_id,
+    });
+  } catch (err) {
+    console.error("Delete Recruiter Job Error:", err);
+    if (err.name === "ConditionalCheckFailedException") {
+      return res.status(404).json({ error: "Recruiter job not found" });
+    }
+    return res.status(500).json({ error: "Failed to delete recruiter job" });
   }
 };
 
@@ -1451,19 +1514,20 @@ export const getAllAdminJobs = async (req, res) => {
     };
 
     list.sort((a, b) => {
-      const aTime = new Date(a.created_at || 0).getTime();
-      const bTime = new Date(b.created_at || 0).getTime();
+      const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+      const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
       return sort === "oldest" ? aTime - bTime : bTime - aTime;
     });
 
     const total = list.length;
     const totalPages = Math.max(1, Math.ceil(total / ADMIN_JOBS_PAGE_SIZE));
-    const start = (pageNum - 1) * ADMIN_JOBS_PAGE_SIZE;
+    const safePageNum = Math.min(pageNum, totalPages);
+    const start = (safePageNum - 1) * ADMIN_JOBS_PAGE_SIZE;
     const data = list.slice(start, start + ADMIN_JOBS_PAGE_SIZE);
 
     return res.status(200).json({
       success: true,
-      page: pageNum,
+      page: safePageNum,
       limit: ADMIN_JOBS_PAGE_SIZE,
       total,
       total_pages: totalPages,

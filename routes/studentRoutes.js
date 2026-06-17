@@ -1,5 +1,5 @@
 import express from "express";
-import { updateLogo, registerStudent, loginStudent, updateProfile, upload, getPremiumPrices, getUserList, setManualPlan } from "../controllers/studentController.js";
+import { updateLogo, registerStudent, loginStudent, updateProfile, upload, getPremiumPrices, getUserList, sendManualPlanOtp, verifyManualPlanOtp, setManualPlan } from "../controllers/studentController.js";
 import { verifyToken } from "../utils/auth.js";
 
 const router = express.Router();
@@ -28,6 +28,8 @@ router.put("/profile/:email/upload", upload.single("document"), updateProfile);
   
 router.get("/premium-prices", getPremiumPrices);
 router.get("/users", getUserList);
+router.post("/manual-plan/send-otp", sendManualPlanOtp);
+router.post("/manual-plan/verify-otp", verifyManualPlanOtp);
 router.put("/manual-plan", setManualPlan);
 
 export default router;
