@@ -845,6 +845,16 @@ export const updateRecruiterJobByAdmin = async (req, res) => {
         jobStatus.charAt(0).toUpperCase() + jobStatus.slice(1).toLowerCase();
     }
 
+    // Keep is_premium and premium_job in sync
+    if (updates.is_premium !== undefined || updates.premium_job !== undefined) {
+      const premiumValue =
+        updates.is_premium !== undefined
+          ? updates.is_premium
+          : updates.premium_job;
+      updates.is_premium = premiumValue;
+      updates.premium_job = premiumValue;
+    }
+
     let updateExp = "SET updated_at = :updated_at";
     const exprAttrValues = {
       ":updated_at": new Date().toISOString(),
@@ -999,7 +1009,7 @@ export const markJobPremium = async (req, res) => {
     const updateCommand = new UpdateCommand({
       TableName: tableName,
       Key: { job_id },
-      UpdateExpression: "SET premium_job = :isPremium",
+      UpdateExpression: "SET is_premium = :isPremium, premium_job = :isPremium",
       ExpressionAttributeValues: {
         ":isPremium": is_premium,
       },
