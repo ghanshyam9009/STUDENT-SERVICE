@@ -627,6 +627,7 @@ export const getApplicationsByJobId = async (req, res) => {
 };
 
 const PAGE_SIZE = 10;
+const RECENT_CANDIDATES_LIMIT = 10;
 
 const scanAllTableItems = async (tableName) => {
   const items = [];
@@ -723,22 +724,37 @@ const normalizeLocations = (location) => {
   return [String(location)];
 };
 
+const normalizeSearchText = (value) =>
+  String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .trim();
+
 const matchesSearch = (entry, search) => {
   if (!search) return true;
 
-  const q = search.toLowerCase().trim();
+  const q = normalizeSearchText(search);
+  if (!q) return true;
+
   const haystack = [
     entry.candidate?.name,
     entry.candidate?.email,
+    entry.candidate?.phone_number,
+    entry.candidate?.student_id,
+    entry.user_id,
     entry.job?.company_name,
     entry.job?.job_title,
     entry.user_details?.full_name,
     entry.user_details?.email,
+    entry.user_details?.phone_number,
+    entry.application_details?.student_name,
+    entry.application_details?.student_email,
+    entry.application_details?.student_phone,
     entry.job_details?.company_name,
     entry.job_details?.job_title,
   ]
     .filter(Boolean)
-    .map((v) => String(v).toLowerCase());
+    .map(normalizeSearchText);
 
   return haystack.some((text) => text.includes(q));
 };
@@ -827,6 +843,8 @@ export const getAllAppliedCandidates = async (req, res) => {
     const {
       page = "1",
       search = "",
+      q = "",
+      name = "",
       status = "",
       role = "",
       company = "",
@@ -836,6 +854,7 @@ export const getAllAppliedCandidates = async (req, res) => {
       sort = "newest",
     } = req.query;
 
+    const searchQuery = String(search || q || name || "").trim();
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
 
     const [appliedJobs, students, allTasks] = await Promise.all([
@@ -875,8 +894,16 @@ export const getAllAppliedCandidates = async (req, res) => {
       return formatAppliedCandidate(applied, user, job, application, tasks);
     });
 
-    if (search) {
-      entries = entries.filter((e) => matchesSearch(e, search));
+    const recentCandidates = [...entries]
+      .sort((a, b) => {
+        const dateA = new Date(a.applied_date || 0).getTime();
+        const dateB = new Date(b.applied_date || 0).getTime();
+        return dateB - dateA;
+      })
+      .slice(0, RECENT_CANDIDATES_LIMIT);
+
+    if (searchQuery) {
+      entries = entries.filter((e) => matchesSearch(e, searchQuery));
     }
 
     if (status) {
@@ -932,8 +959,9 @@ export const getAllAppliedCandidates = async (req, res) => {
     });
 
     const total = entries.length;
-    const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
-    const start = (pageNum - 1) * PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const safePageNum = Math.min(pageNum, totalPages);
+    const start = (safePageNum - 1) * PAGE_SIZE;
     const paginated = entries.slice(start, start + PAGE_SIZE);
 
     const companies = [
@@ -953,15 +981,17 @@ export const getAllAppliedCandidates = async (req, res) => {
     return res.status(200).json({
       success: true,
       total,
-      page: pageNum,
+      page: safePageNum,
       limit: PAGE_SIZE,
       total_pages: totalPages,
       showing: paginated.length,
+      search: searchQuery || undefined,
       filters: {
         companies,
         jobs,
         statuses: ["Approved", "Pending", "Rejected"],
       },
+      recent_candidates: recentCandidates,
       data: paginated,
     });
   } catch (err) {
