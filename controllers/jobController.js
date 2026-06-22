@@ -183,7 +183,7 @@ const enrichApplication = (application, studentLookup) => {
 };
 
 // -----------------------------------------
-// Helper: Send job notification to all students via AWS SES
+// Helper: Send job notification to all students via SMTP (Nodemailer)
 // -----------------------------------------
 const notifyAllStudents = async (jobDetails) => {
   try {
@@ -225,7 +225,7 @@ const notifyAllStudents = async (jobDetails) => {
     console.log(
       `Job notification emails: ${sent}/${students.length} sent` +
         (failed.length
-          ? ` (${failed.length} failed — SES sandbox only allows verified recipient addresses)`
+          ? ` (${failed.length} failed)`
           : "")
     );
   } catch (err) {
