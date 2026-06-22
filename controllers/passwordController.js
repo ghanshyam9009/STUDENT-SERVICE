@@ -38,7 +38,7 @@ export const sendOtp = async (req, res) => {
     const expiresAt = Date.now() + getOtpExpiryMs();
     otpStore[`${role}-${email}`] = { otp, expiresAt }; // store key as role-email
 
-    // Send OTP via AWS SES
+    // Send OTP via SMTP (Nodemailer)
     await sendOtpEmail({
       to: email,
       userName: user.Item.full_name || user.Item.name || "User",
