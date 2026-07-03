@@ -17,7 +17,6 @@ dotenv.config();
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
-const ADMIN_TABLE = process.env.ADMIN_TABLE;
 const PAGE_SIZE = 20;
 
 const MANUAL_PLAN_OTP_PREFIX = "manual-plan";
@@ -35,20 +34,6 @@ const getManualPlanOtpKey = (adminEmail) =>
 
 const getManualPlanVerifyKey = (adminEmail) =>
   `${MANUAL_PLAN_VERIFY_PREFIX}-${String(adminEmail).toLowerCase().trim()}`;
-
-const findAdminByEmail = async (email) => {
-  const result = await ddbDocClient.send(
-    new ScanCommand({
-      TableName: ADMIN_TABLE,
-      FilterExpression: "email = :email",
-      ExpressionAttributeValues: {
-        ":email": email,
-      },
-    })
-  );
-
-  return result.Items?.[0] || null;
-};
 
 const isManualPlanVerified = (adminEmail, verificationToken) => {
   const record = otpStore[getManualPlanVerifyKey(adminEmail)];
@@ -325,11 +310,6 @@ export const sendManualPlanOtp = async (req, res) => {
     }
 
     const normalizedEmail = String(admin_email).toLowerCase().trim();
-    const admin = await findAdminByEmail(normalizedEmail);
-
-    if (!admin) {
-      return res.status(404).json({ error: "Admin not found" });
-    }
 
     const otp = generateOtp();
     const expiresAt = Date.now() + getOtpExpiryMs();
@@ -339,12 +319,12 @@ export const sendManualPlanOtp = async (req, res) => {
 
     await sendOtpEmail({
       to: normalizedEmail,
-      userName: admin.full_name || "Admin",
+      userName: normalizedEmail.split("@")[0] || "User",
       otp,
     });
 
     return res.status(200).json({
-      message: "OTP sent to admin email successfully",
+      message: "OTP sent successfully",
     });
   } catch (error) {
     console.error("Error sending manual plan OTP:", error);
