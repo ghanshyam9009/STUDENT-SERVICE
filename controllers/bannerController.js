@@ -124,16 +124,30 @@ const deleteBannerImageFromS3 = async (item, fallbackBucket) => {
 export const uploadBanner = async (req, res) => {
   try {
     const page = normalizePageName(req.body?.page);
+    const files = [
+      ...(req.file ? [req.file] : []),
+      ...(Array.isArray(req.files)
+        ? req.files
+        : Object.values(req.files || {}).flat()),
+    ];
 
     if (!page) {
       return res.status(400).json({ error: "page is required" });
     }
 
-    if (!req.file) {
-      return res.status(400).json({ error: "image file is required" });
+    if (files.length === 0) {
+      return res.status(400).json({
+        error: "At least one image file is required",
+      });
     }
 
-    if (!req.file.mimetype?.startsWith("image/")) {
+    if (files.length > 10) {
+      return res.status(400).json({
+        error: "A maximum of 10 images can be uploaded at once",
+      });
+    }
+
+    if (files.some((file) => !file.mimetype?.startsWith("image/"))) {
       return res.status(400).json({ error: "Only image files are allowed" });
     }
 
@@ -145,80 +159,94 @@ export const uploadBanner = async (req, res) => {
       });
     }
 
-    const { key, image_url } = await uploadFileToS3(page, req.file, bucket);
     const now = new Date().toISOString();
-
-    // Same page par purane banners: S3 image delete + record replace
     const existingForPage = (await scanAllBanners()).filter(
       (b) => normalizePageName(b.page) === page
     );
+    const uploadedFiles = [];
+    const createdBannerIds = [];
 
-    let banner_id = uuidv4();
-    let created_at = now;
+    try {
+      for (const file of files) {
+        uploadedFiles.push(await uploadFileToS3(page, file, bucket));
+      }
 
-    if (existingForPage.length > 0) {
-      const primary = existingForPage.sort(
-        (a, b) =>
-          new Date(b.updated_at || b.created_at || 0).getTime() -
-          new Date(a.updated_at || a.created_at || 0).getTime()
-      )[0];
-      banner_id = primary.banner_id;
-      created_at = primary.created_at || now;
+      const items = uploadedFiles.map(({ key, image_url }) => ({
+        banner_id: uuidv4(),
+        page,
+        image_url,
+        bucket,
+        key,
+        created_at: now,
+        updated_at: now,
+      }));
 
+      for (const item of items) {
+        await ddbDocClient.send(
+          new PutCommand({
+            TableName: BANNER_TABLE,
+            Item: item,
+          })
+        );
+        createdBannerIds.push(item.banner_id);
+      }
+
+      // A successful upload replaces the previous banner set for this page.
       for (const old of existingForPage) {
         await deleteBannerImageFromS3(old, bucket);
-        if (old.banner_id !== banner_id) {
+        try {
           await ddbDocClient.send(
             new DeleteCommand({
               TableName: BANNER_TABLE,
               Key: { banner_id: old.banner_id },
             })
           );
+        } catch (cleanupError) {
+          console.warn(
+            "Failed to remove old banner record:",
+            old.banner_id,
+            cleanupError.message
+          );
         }
       }
-    }
 
-    const item = {
-      banner_id,
-      page,
-      image_url,
-      bucket,
-      key,
-      created_at,
-      updated_at: now,
-    };
+      return res.status(existingForPage.length > 0 ? 200 : 201).json({
+        success: true,
+        message:
+          existingForPage.length > 0
+            ? "Banners replaced successfully"
+            : "Banners uploaded successfully",
+        count: items.length,
+        banner: items[0],
+        banners: items,
+      });
+    } catch (uploadError) {
+      await Promise.allSettled([
+        ...uploadedFiles.map(({ key }) =>
+          s3Client.send(
+            new DeleteObjectCommand({
+              Bucket: bucket,
+              Key: key,
+            })
+          )
+        ),
+        ...createdBannerIds.map((banner_id) =>
+          ddbDocClient.send(
+            new DeleteCommand({
+              TableName: BANNER_TABLE,
+              Key: { banner_id },
+            })
+          )
+        ),
+      ]);
 
-    try {
-      await ddbDocClient.send(
-        new PutCommand({
-          TableName: BANNER_TABLE,
-          Item: item,
-        })
-      );
-    } catch (dbError) {
-      await s3Client.send(
-        new DeleteObjectCommand({
-          Bucket: bucket,
-          Key: key,
-        })
-      );
-
-      if (isTableNotFoundError(dbError)) {
+      if (isTableNotFoundError(uploadError)) {
         return res.status(500).json({
           error: `Banner table '${BANNER_TABLE}' not found. Create table and set BANNER_TABLE in .env`,
         });
       }
-      throw dbError;
+      throw uploadError;
     }
-
-    return res.status(existingForPage.length > 0 ? 200 : 201).json({
-      success: true,
-      message:
-        existingForPage.length > 0
-          ? "Banner replaced successfully (old image removed)"
-          : "Banner uploaded successfully",
-      banner: item,
-    });
   } catch (error) {
     console.error("Banner Upload Error:", error);
     return res.status(500).json({ error: "Failed to upload banner" });

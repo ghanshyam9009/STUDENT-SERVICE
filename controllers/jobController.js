@@ -42,7 +42,7 @@ const TASK_TABLE = process.env.TASK_TABLE;
 const USERS_TABLE = process.env.USERS_TABLE; // ✅ students table
 const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE;
 const APPLICATION_TABLE = process.env.APPLICATION_TABLE;
-const ADMIN_JOBS_PAGE_SIZE = 5;
+const ADMIN_JOBS_PAGE_SIZE = 10;
 
 const scanAllItems = async (tableName) => {
   const items = [];
@@ -1421,6 +1421,7 @@ export const getAllAdminJobs = async (req, res) => {
   try {
     const {
       page = "1",
+      limit = "",
       search = "",
       job_title = "",
       company_name = "",
@@ -1431,6 +1432,10 @@ export const getAllAdminJobs = async (req, res) => {
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(
+      1,
+      parseInt(limit, 10) || ADMIN_JOBS_PAGE_SIZE
+    );
 
     const [jobs, applications, students] = await Promise.all([
       scanAllItems(JOB_TABLE),
@@ -1530,15 +1535,15 @@ export const getAllAdminJobs = async (req, res) => {
     });
 
     const total = list.length;
-    const totalPages = Math.max(1, Math.ceil(total / ADMIN_JOBS_PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(total / limitNum));
     const safePageNum = Math.min(pageNum, totalPages);
-    const start = (safePageNum - 1) * ADMIN_JOBS_PAGE_SIZE;
-    const data = list.slice(start, start + ADMIN_JOBS_PAGE_SIZE);
+    const start = (safePageNum - 1) * limitNum;
+    const data = list.slice(start, start + limitNum);
 
     return res.status(200).json({
       success: true,
       page: safePageNum,
-      limit: ADMIN_JOBS_PAGE_SIZE,
+      limit: limitNum,
       total,
       total_pages: totalPages,
       showing: data.length,

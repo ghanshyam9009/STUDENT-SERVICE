@@ -337,6 +337,7 @@ export const getAllRecruiterJob = async (req, res) => {
     const {
       recruiter_id = "",
       page = "1",
+      limit = "",
       tab = "all",
       company_name = "",
       recruiter_name = "",
@@ -346,6 +347,7 @@ export const getAllRecruiterJob = async (req, res) => {
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || PAGE_SIZE);
     const normalizedTab = normalizeTab(tab);
 
     const [jobs, tasks, appliedJobs, recruiters] = await Promise.all([
@@ -454,15 +456,16 @@ export const getAllRecruiterJob = async (req, res) => {
     });
 
     const total = list.length;
-    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    const start = (pageNum - 1) * PAGE_SIZE;
-    const data = list.slice(start, start + PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(total / limitNum));
+    const safePageNum = Math.min(pageNum, totalPages);
+    const start = (safePageNum - 1) * limitNum;
+    const data = list.slice(start, start + limitNum);
 
     return res.status(200).json({
       success: true,
       tab: normalizedTab,
-      page: pageNum,
-      limit: PAGE_SIZE,
+      page: safePageNum,
+      limit: limitNum,
       total,
       total_pages: totalPages,
       showing: data.length,
