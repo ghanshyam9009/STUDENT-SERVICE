@@ -842,6 +842,7 @@ export const getAllAppliedCandidates = async (req, res) => {
   try {
     const {
       page = "1",
+      limit = "",
       search = "",
       q = "",
       name = "",
@@ -856,6 +857,7 @@ export const getAllAppliedCandidates = async (req, res) => {
 
     const searchQuery = String(search || q || name || "").trim();
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || PAGE_SIZE);
 
     const [appliedJobs, students, allTasks] = await Promise.all([
       scanAllTableItems(APPLIED_TABLE),
@@ -959,10 +961,10 @@ export const getAllAppliedCandidates = async (req, res) => {
     });
 
     const total = entries.length;
-    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(total / limitNum));
     const safePageNum = Math.min(pageNum, totalPages);
-    const start = (safePageNum - 1) * PAGE_SIZE;
-    const paginated = entries.slice(start, start + PAGE_SIZE);
+    const start = (safePageNum - 1) * limitNum;
+    const paginated = entries.slice(start, start + limitNum);
 
     const companies = [
       ...new Set(
@@ -982,7 +984,7 @@ export const getAllAppliedCandidates = async (req, res) => {
       success: true,
       total,
       page: safePageNum,
-      limit: PAGE_SIZE,
+      limit: limitNum,
       total_pages: totalPages,
       showing: paginated.length,
       search: searchQuery || undefined,
