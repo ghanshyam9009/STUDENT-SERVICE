@@ -626,7 +626,7 @@ export const getApplicationsByJobId = async (req, res) => {
   }
 };
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 25;
 const RECENT_CANDIDATES_LIMIT = 10;
 
 const scanAllTableItems = async (tableName) => {
@@ -837,6 +837,52 @@ const formatAppliedCandidate = (applied, user, job, application, tasks = []) => 
   };
 };
 
+const getAppliedCandidateTimestamp = (entry) => {
+  const timestamp = new Date(entry.applied_date || 0).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
+const getCandidateIdentity = (entry) => {
+  const candidateId = normalizeId(
+    entry.user_id ||
+      entry.candidate?.student_id ||
+      entry.application_details?.student_id ||
+      entry.application_details?.user_id
+  );
+
+  if (candidateId) return `id:${candidateId.toLowerCase()}`;
+
+  const email = String(
+    entry.candidate?.email ||
+      entry.user_details?.email ||
+      entry.application_details?.student_email ||
+      ""
+  )
+    .toLowerCase()
+    .trim();
+
+  if (email) return `email:${email}`;
+
+  return `application:${entry.application_id || entry.applied_id}`;
+};
+
+const getLatestUniqueCandidates = (entries) => {
+  const seenCandidates = new Set();
+
+  return [...entries]
+    .sort(
+      (a, b) =>
+        getAppliedCandidateTimestamp(b) - getAppliedCandidateTimestamp(a)
+    )
+    .filter((entry) => {
+      const identity = getCandidateIdentity(entry);
+      if (seenCandidates.has(identity)) return false;
+
+      seenCandidates.add(identity);
+      return true;
+    });
+};
+
 // GET /api/admin/applied-candidates
 export const getAllAppliedCandidates = async (req, res) => {
   try {
@@ -1001,6 +1047,197 @@ export const getAllAppliedCandidates = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to fetch applied candidates",
+    });
+  }
+};
+
+// GET /api/admin/get-all-applied-candidates
+// Separate API that returns only the latest application for each candidate.
+export const getallAppliedCandidates = async (req, res) => {
+  try {
+    const {
+      page = "1",
+      limit = "",
+      search = "",
+      q = "",
+      name = "",
+      status = "",
+      role = "",
+      company = "",
+      job_id = "",
+      date_from = "",
+      date_to = "",
+      sort = "newest",
+    } = req.query;
+
+    const searchQuery = String(search || q || name || "").trim();
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || PAGE_SIZE);
+
+    const [appliedJobs, students, allTasks] = await Promise.all([
+      scanAllTableItems(APPLIED_TABLE),
+      scanAllTableItems(STUDENT_TABLE),
+      scanAllTableItems(TASK_TABLE),
+    ]);
+
+    const studentLookup = buildStudentLookup(students);
+    const taskMap = buildTaskLookup(allTasks);
+
+    const uniqueJobIds = [
+      ...new Set(appliedJobs.map((item) => item.job_id).filter(Boolean)),
+    ];
+    const uniqueAppIds = [
+      ...new Set(
+        appliedJobs.map((item) => item.application_id).filter(Boolean)
+      ),
+    ];
+
+    const [jobResults, appResults] = await Promise.all([
+      Promise.all(
+        uniqueJobIds.map((id) => getByKey(JOB_TABLE, "job_id", id))
+      ),
+      Promise.all(
+        uniqueAppIds.map((id) =>
+          getByKey(APPLICATION_TABLE, "application_id", id)
+        )
+      ),
+    ]);
+
+    const jobMap = new Map(
+      jobResults.filter(Boolean).map((job) => [job.job_id, job])
+    );
+    const appMap = new Map(
+      appResults
+        .filter(Boolean)
+        .map((application) => [application.application_id, application])
+    );
+
+    let entries = appliedJobs.map((applied) => {
+      const job = jobMap.get(applied.job_id) || null;
+      const application = appMap.get(applied.application_id) || null;
+      const user =
+        studentLookup.byUserId.get(normalizeId(applied.user_id)) ||
+        findStudentForApplication(application, studentLookup) ||
+        null;
+      const tasks = taskMap.get(applied.application_id) || [];
+
+      return formatAppliedCandidate(applied, user, job, application, tasks);
+    });
+
+    const recentCandidates = getLatestUniqueCandidates(entries).slice(
+      0,
+      RECENT_CANDIDATES_LIMIT
+    );
+
+    if (searchQuery) {
+      entries = entries.filter((entry) =>
+        matchesSearch(entry, searchQuery)
+      );
+    }
+
+    if (status) {
+      entries = entries.filter((entry) =>
+        matchesTaskStatusFilter(entry, status)
+      );
+    }
+
+    if (role) {
+      const roleFilter = role.toLowerCase().trim();
+      entries = entries.filter((entry) => {
+        const postedBy = String(
+          entry.job?.posted_by || entry.job_details?.posted_by || ""
+        )
+          .toLowerCase()
+          .trim();
+
+        if (roleFilter === "admin") return postedBy === "admin";
+        if (roleFilter === "recruiter") return postedBy === "recruiter";
+        return true;
+      });
+    }
+
+    if (company) {
+      const companyFilter = company.toLowerCase();
+      entries = entries.filter((entry) =>
+        (entry.job?.company_name || "")
+          .toLowerCase()
+          .includes(companyFilter)
+      );
+    }
+
+    if (job_id) {
+      entries = entries.filter((entry) => entry.job_id === job_id);
+    }
+
+    if (date_from) {
+      const from = new Date(date_from).getTime();
+      entries = entries.filter((entry) => {
+        const appliedAt = getAppliedCandidateTimestamp(entry);
+        return !Number.isNaN(from) && appliedAt >= from;
+      });
+    }
+
+    if (date_to) {
+      const to = new Date(date_to).getTime();
+      entries = entries.filter((entry) => {
+        const appliedAt = getAppliedCandidateTimestamp(entry);
+        return !Number.isNaN(to) && appliedAt <= to;
+      });
+    }
+
+    entries = getLatestUniqueCandidates(entries);
+
+    if (sort === "oldest") {
+      entries.reverse();
+    }
+
+    const total = entries.length;
+    const totalPages = Math.max(1, Math.ceil(total / limitNum));
+    const safePageNum = Math.min(pageNum, totalPages);
+    const start = (safePageNum - 1) * limitNum;
+    const paginated = entries.slice(start, start + limitNum);
+
+    const companies = [
+      ...new Set(
+        entries.map((entry) => entry.job?.company_name).filter(Boolean)
+      ),
+    ].sort();
+
+    const jobs = [
+      ...new Map(
+        entries
+          .filter((entry) => entry.job_id && entry.job?.job_title)
+          .map((entry) => [
+            entry.job_id,
+            {
+              job_id: entry.job_id,
+              job_title: entry.job.job_title,
+            },
+          ])
+      ).values(),
+    ];
+
+    return res.status(200).json({
+      success: true,
+      total,
+      page: safePageNum,
+      limit: limitNum,
+      total_pages: totalPages,
+      showing: paginated.length,
+      search: searchQuery || undefined,
+      filters: {
+        companies,
+        jobs,
+        statuses: ["Approved", "Pending", "Rejected"],
+      },
+      recent_candidates: recentCandidates,
+      data: paginated,
+    });
+  } catch (err) {
+    console.error("Get Unique Applied Candidates Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch unique applied candidates",
     });
   }
 };

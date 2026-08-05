@@ -42,7 +42,7 @@ const TASK_TABLE = process.env.TASK_TABLE;
 const USERS_TABLE = process.env.USERS_TABLE; // ✅ students table
 const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE;
 const APPLICATION_TABLE = process.env.APPLICATION_TABLE;
-const ADMIN_JOBS_PAGE_SIZE = 10;
+const ADMIN_JOBS_PAGE_SIZE = 25;
 
 const scanAllItems = async (tableName) => {
   const items = [];

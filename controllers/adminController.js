@@ -22,7 +22,7 @@ const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE; // DynamoDB table name
 const STUDENT_TABLE = process.env.USERS_TABLE;
 const JOB_TABLE = process.env.JOB_TABLE;
 const PLANS_TABLE = process.env.PLANS_TABLE || "plans";
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 25;
 
 const scanAllItems = async (tableName) => {
   const items = [];

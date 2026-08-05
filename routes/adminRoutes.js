@@ -10,7 +10,10 @@ import {
   blockStudentByAdmin,
   blockEmployerByAdmin
 } from "../controllers/adminController.js";
-import { getAllAppliedCandidates } from "../controllers/applicationController.js";
+import {
+  getAllAppliedCandidates,
+  getallAppliedCandidates,
+} from "../controllers/applicationController.js";
 
 const router = express.Router();
 
@@ -29,6 +32,7 @@ router.put("/approved-recruiter", approveRecruiter);
 router.get("/get-all-recruiter",getAllRecruiters)
 router.get("/get-all-candidates",getAllcandidates)
 router.get("/applied-candidates", getAllAppliedCandidates)
+router.get("/get-all-applied-candidates", getallAppliedCandidates)
 router.post("/block-recruiter",blockEmployerByAdmin)
 router.post("/block-student",blockStudentByAdmin)
 

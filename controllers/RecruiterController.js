@@ -31,7 +31,7 @@ const EMPLOYER_TABLE = process.env.EMPLOYER_TABLE; // DynamoDB table name
 const JOB_TABLE = process.env.JOB_TABLE;
 const TASK_TABLE = process.env.TASK_TABLE;
 const APPLIED_TABLE = process.env.APPLIED_TABLE;
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 25;
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION });
 

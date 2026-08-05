@@ -17,7 +17,7 @@ dotenv.config();
 
 const USERS_TABLE = process.env.USERS_TABLE;
 const SUBSCRIPTION_TABLE = process.env.SUBSCRIPTION_TABLE;
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 25;
 
 const MANUAL_PLAN_OTP_PREFIX = "manual-plan";
 const MANUAL_PLAN_VERIFY_PREFIX = "manual-plan-verified";
